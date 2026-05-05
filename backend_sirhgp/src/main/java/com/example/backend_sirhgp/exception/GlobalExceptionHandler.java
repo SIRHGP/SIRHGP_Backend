@@ -17,15 +17,6 @@ import java.io.IOException;
 import java.util.HashMap;
 import java.util.Map;
 
-/**
- * Gestionnaire global d'exceptions.
- *
- * CORRECTIONS :
- * - IOException ajoutée — DocumentService peut en lancer lors du upload/download.
- * - Grâce à ce handler global, les BindingResult manuels dans les controllers
- *   sont désormais redondants (MethodArgumentNotValidException est géré ici).
- *   Les controllers corrigés les ont supprimés pour simplifier le code.
- */
 @RestControllerAdvice
 public class GlobalExceptionHandler {
 
@@ -45,10 +36,13 @@ public class GlobalExceptionHandler {
                 .body(new ApiResponse<>(false, ex.getMessage(), null));
     }
 
-    /**
-     * Gère les erreurs de validation Jakarta Bean Validation (@Valid).
-     * Retourne un map champ → message d'erreur.
-     */
+    @ExceptionHandler(UnauthorizedException.class)
+    public ResponseEntity<ApiResponse<Void>> handleUnauthorized(UnauthorizedException ex) {
+        log.warn("Non autorisé : {}", ex.getMessage());
+        return ResponseEntity.status(HttpStatus.FORBIDDEN)
+                .body(new ApiResponse<>(false, ex.getMessage(), null));
+    }
+
     @ExceptionHandler(MethodArgumentNotValidException.class)
     public ResponseEntity<ApiResponse<Map<String, String>>> handleValidation(
             MethodArgumentNotValidException ex) {
@@ -83,7 +77,6 @@ public class GlobalExceptionHandler {
                 .body(new ApiResponse<>(false, "Donnée en conflit ou déjà existante", null));
     }
 
-    // CORRECTION : IOException manquait — DocumentService peut en lancer
     @ExceptionHandler(IOException.class)
     public ResponseEntity<ApiResponse<Void>> handleIO(IOException ex) {
         log.error("Erreur I/O : {}", ex.getMessage(), ex);

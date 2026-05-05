@@ -3,7 +3,6 @@ package com.example.backend_sirhgp.mapper;
 import com.example.backend_sirhgp.dto.request.FactureRequestDTO;
 import com.example.backend_sirhgp.dto.response.FactureResponseDTO;
 import com.example.backend_sirhgp.dto.response.LigneFactureResponseDTO;
-import com.example.backend_sirhgp.dto.response.ProjetResponseDTO;
 import com.example.backend_sirhgp.model.Departement;
 import com.example.backend_sirhgp.model.Employer;
 import com.example.backend_sirhgp.model.Facture;
@@ -18,7 +17,7 @@ import org.springframework.stereotype.Component;
 
 @Generated(
     value = "org.mapstruct.ap.MappingProcessor",
-    date = "2026-04-13T11:29:18+0200",
+    date = "2026-05-05T09:21:42+0200",
     comments = "version: 1.5.5.Final, compiler: javac, environment: Java 17.0.18 (Microsoft)"
 )
 @Component
@@ -55,6 +54,10 @@ public class FactureMapperImpl implements FactureMapper {
         factureResponseDTO.setTypeFacture( facture.getTypeFacture() );
         factureResponseDTO.setDateCreation( facture.getDateCreation() );
         factureResponseDTO.setDateModification( facture.getDateModification() );
+        factureResponseDTO.setMessage( facture.getMessage() );
+        factureResponseDTO.setEstConsultee( facture.isEstConsultee() );
+        factureResponseDTO.setDateEnvoi( facture.getDateEnvoi() );
+        factureResponseDTO.setDateConsultation( facture.getDateConsultation() );
         factureResponseDTO.setLignesFacture( ligneFactureSetToLigneFactureResponseDTOSet( facture.getLignesFacture() ) );
 
         return factureResponseDTO;
@@ -128,12 +131,12 @@ public class FactureMapperImpl implements FactureMapper {
         return name;
     }
 
-    protected ProjetResponseDTO.EmployerSummaryDTO employerToEmployerSummaryDTO(Employer employer) {
+    protected FactureResponseDTO.EmployerSummaryDTO employerToEmployerSummaryDTO(Employer employer) {
         if ( employer == null ) {
             return null;
         }
 
-        ProjetResponseDTO.EmployerSummaryDTO employerSummaryDTO = new ProjetResponseDTO.EmployerSummaryDTO();
+        FactureResponseDTO.EmployerSummaryDTO employerSummaryDTO = new FactureResponseDTO.EmployerSummaryDTO();
 
         employerSummaryDTO.setId( employer.getId() );
         employerSummaryDTO.setName( employer.getName() );
@@ -144,12 +147,12 @@ public class FactureMapperImpl implements FactureMapper {
         return employerSummaryDTO;
     }
 
-    protected ProjetResponseDTO.EmployerSummaryDTO employerToEmployerSummaryDTO1(Employer employer) {
+    protected FactureResponseDTO.EmployerSummaryDTO employerToEmployerSummaryDTO1(Employer employer) {
         if ( employer == null ) {
             return null;
         }
 
-        ProjetResponseDTO.EmployerSummaryDTO employerSummaryDTO = new ProjetResponseDTO.EmployerSummaryDTO();
+        FactureResponseDTO.EmployerSummaryDTO employerSummaryDTO = new FactureResponseDTO.EmployerSummaryDTO();
 
         employerSummaryDTO.setId( employer.getId() );
         employerSummaryDTO.setName( employer.getName() );

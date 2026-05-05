@@ -2,7 +2,6 @@ package com.example.backend_sirhgp.controller;
 
 import com.example.backend_sirhgp.dto.request.DocumentRequestDTO;
 import com.example.backend_sirhgp.dto.request.DocumentTransferRequestDTO;
-import com.example.backend_sirhgp.dto.response.DocumentPartageResponseDTO;
 import com.example.backend_sirhgp.dto.response.DocumentResponseDTO;
 import com.example.backend_sirhgp.response.ApiResponse;
 import com.example.backend_sirhgp.service.DocumentService;
@@ -27,137 +26,122 @@ public class DocumentController {
 
     private final DocumentService documentService;
 
-    // ── Upload ───────────────────────────────────────────────────────────────
+    // ─── Upload avec dispatch optionnel ───────────────────────────────────────
 
-    @PostMapping(consumes = MediaType.MULTIPART_FORM_DATA_VALUE)
+    @PostMapping(value = "/upload", consumes = MediaType.MULTIPART_FORM_DATA_VALUE)
     public ResponseEntity<ApiResponse<DocumentResponseDTO>> upload(
             @RequestPart("document") @Valid DocumentRequestDTO dto,
             @RequestPart("fichier") MultipartFile fichier) throws IOException {
         return ResponseEntity.status(201).body(
                 new ApiResponse<>(true, "Document uploadé avec succès",
-                        documentService.upload(dto, fichier)));
+                        documentService.uploadWithDispatch(dto, fichier)));
     }
 
-    // ── Transfer ─────────────────────────────────────────────────────────────
+    // ─── Transfert d'un document existant ─────────────────────────────────────
 
-    /**
-     * POST /api/documents/transfer/{id}
-     * Transfère un document existant à un autre employé.
-     * Seuls l'expéditeur et le destinataire auront accès.
-     */
-    @PostMapping("/transfer/{id}")
-    public ResponseEntity<ApiResponse<DocumentPartageResponseDTO>> transfer(
+    @PostMapping("/{id}/transfer")
+    public ResponseEntity<ApiResponse<DocumentResponseDTO>> transfer(
             @PathVariable Long id,
             @Valid @RequestBody DocumentTransferRequestDTO dto) {
         return ResponseEntity.status(201).body(
                 new ApiResponse<>(true, "Document transféré avec succès",
-                        documentService.transfer(id, dto)));
+                        documentService.transferDocument(id, dto)));
     }
 
-    // ── Partages reçus ───────────────────────────────────────────────────────
+    // ─── Documents reçus ──────────────────────────────────────────────────────
 
-    /**
-     * GET /api/documents/partages/recus/{employerId}
-     * Documents reçus par un employé — visibles uniquement par lui.
-     */
-    @GetMapping("/partages/recus/{employerId}")
-    public ResponseEntity<ApiResponse<List<DocumentPartageResponseDTO>>> getPartagesRecus(
+    @GetMapping("/received/{employerId}")
+    public ResponseEntity<ApiResponse<List<DocumentResponseDTO>>> getReceivedDocuments(
             @PathVariable Long employerId) {
         return ResponseEntity.ok(
-                new ApiResponse<>(true, "Partages reçus récupérés",
-                        documentService.getPartagesRecus(employerId)));
+                new ApiResponse<>(true, "Documents reçus récupérés",
+                        documentService.getReceivedDocuments(employerId)));
     }
 
-    // ── Partages envoyés ─────────────────────────────────────────────────────
+    // ─── Documents non lus ────────────────────────────────────────────────────
 
-    /**
-     * GET /api/documents/partages/envoyes/{employerId}
-     * Documents envoyés par un employé.
-     */
-    @GetMapping("/partages/envoyes/{employerId}")
-    public ResponseEntity<ApiResponse<List<DocumentPartageResponseDTO>>> getPartagesEnvoyes(
+    @GetMapping("/unread/{employerId}")
+    public ResponseEntity<ApiResponse<List<DocumentResponseDTO>>> getUnreadDocuments(
             @PathVariable Long employerId) {
         return ResponseEntity.ok(
-                new ApiResponse<>(true, "Partages envoyés récupérés",
-                        documentService.getPartagesEnvoyes(employerId)));
+                new ApiResponse<>(true, "Documents non lus récupérés",
+                        documentService.getUnreadDocuments(employerId)));
     }
 
-    // ── Marquer lu ───────────────────────────────────────────────────────────
 
-    /**
-     * PATCH /api/documents/{id}/lu
-     * Marque un document partagé comme lu pour l'utilisateur courant.
-     */
-    @PatchMapping("/{id}/lu")
-    public ResponseEntity<ApiResponse<Void>> marquerLu(@PathVariable Long id) {
-        documentService.marquerLu(id);
+// ─── Récupérer les métadonnées ──────────────────────────────────────────────
+
+    @GetMapping("/{id}/metadata")
+    public ResponseEntity<ApiResponse<DocumentResponseDTO>> getMetadata(@PathVariable Long id) {
         return ResponseEntity.ok(
-                new ApiResponse<>(true, "Marqué comme lu", null));
+                new ApiResponse<>(true, "Métadonnées récupérées",
+                        documentService.getDocumentMetadata(id)));
     }
 
-    // ── CRUD standard ────────────────────────────────────────────────────────
+    // ─── Documents envoyés ────────────────────────────────────────────────────
 
-    @GetMapping
-    public ResponseEntity<ApiResponse<Page<DocumentResponseDTO>>> getAll(Pageable pageable) {
-        return ResponseEntity.ok(
-                new ApiResponse<>(true, "Documents récupérés",
-                        documentService.findAll(pageable)));
-    }
-
-    @GetMapping("/{id}")
-    public ResponseEntity<ApiResponse<DocumentResponseDTO>> getById(
-            @PathVariable Long id) {
-        return ResponseEntity.ok(
-                new ApiResponse<>(true, "Document récupéré",
-                        documentService.findById(id)));
-    }
-
-    @GetMapping("/employer/{employerId}")
-    public ResponseEntity<ApiResponse<List<DocumentResponseDTO>>> getByEmployer(
+    @GetMapping("/sent/{employerId}")
+    public ResponseEntity<ApiResponse<List<DocumentResponseDTO>>> getSentDocuments(
             @PathVariable Long employerId) {
         return ResponseEntity.ok(
-                new ApiResponse<>(true, "Documents de l'employé récupérés",
-                        documentService.findByEmployerId(employerId)));
+                new ApiResponse<>(true, "Documents envoyés récupérés",
+                        documentService.getSentDocuments(employerId)));
     }
 
-    @GetMapping("/projet/{projetId}")
-    public ResponseEntity<ApiResponse<List<DocumentResponseDTO>>> getByProjet(
-            @PathVariable Long projetId) {
+    // ─── Mes documents (authentifié) ──────────────────────────────────────────
+
+    @GetMapping("/me")
+    public ResponseEntity<ApiResponse<Page<DocumentResponseDTO>>> getMyDocuments(Pageable pageable) {
         return ResponseEntity.ok(
-                new ApiResponse<>(true, "Documents du projet récupérés",
-                        documentService.findByProjetId(projetId)));
+                new ApiResponse<>(true, "Mes documents récupérés",
+                        documentService.getMyDocuments(pageable)));
     }
 
-    @PutMapping("/{id}")
-    public ResponseEntity<ApiResponse<DocumentResponseDTO>> update(
-            @PathVariable Long id,
-            @Valid @RequestBody DocumentRequestDTO dto) {
-        return ResponseEntity.ok(
-                new ApiResponse<>(true, "Document modifié",
-                        documentService.update(id, dto)));
+    // ─── Marquer comme lu ─────────────────────────────────────────────────────
+
+    @PatchMapping("/{id}/read")
+    public ResponseEntity<ApiResponse<Void>> markAsRead(@PathVariable Long id) {
+        documentService.markAsRead(id);
+        return ResponseEntity.ok(new ApiResponse<>(true, "Document marqué comme lu", null));
     }
 
-    @DeleteMapping("/{id}")
-    public ResponseEntity<ApiResponse<Void>> delete(
-            @PathVariable Long id) throws IOException {
-        documentService.delete(id);
-        return ResponseEntity.ok(
-                new ApiResponse<>(true, "Document supprimé", null));
+    // ─── Archiver ─────────────────────────────────────────────────────────────
+
+    @PatchMapping("/{id}/archive")
+    public ResponseEntity<ApiResponse<Void>> archive(@PathVariable Long id) {
+        documentService.archiveDocument(id);
+        return ResponseEntity.ok(new ApiResponse<>(true, "Document archivé", null));
     }
 
-    @GetMapping("/download/{id}")
-    public ResponseEntity<ByteArrayResource> download(
-            @PathVariable Long id) throws IOException {
-        DocumentResponseDTO meta    = documentService.findById(id);
-        byte[]              content = documentService.download(id);
+    // ─── Téléchargement ───────────────────────────────────────────────────────
+
+    @GetMapping("/{id}/download")
+    public ResponseEntity<ByteArrayResource> download(@PathVariable Long id) throws IOException {
+        DocumentResponseDTO metadata = documentService.getDocumentMetadata(id);
+        byte[] content = documentService.downloadDocument(id);
+
         return ResponseEntity.ok()
                 .header(HttpHeaders.CONTENT_DISPOSITION,
-                        "attachment; filename=\"" + meta.getNomFichier() + "\"")
+                        "attachment; filename=\"" + metadata.getNomFichier() + "\"")
                 .contentType(MediaType.parseMediaType(
-                        meta.getTypeMime() != null
-                                ? meta.getTypeMime()
-                                : "application/octet-stream"))
-                .contentLength(content.length)
+                        metadata.getTypeMime() != null ? metadata.getTypeMime() : "application/octet-stream"))
                 .body(new ByteArrayResource(content));
+    }
+
+    // ─── Documents publics ────────────────────────────────────────────────────
+
+    @GetMapping("/public")
+    public ResponseEntity<ApiResponse<List<DocumentResponseDTO>>> getPublicDocuments() {
+        return ResponseEntity.ok(
+                new ApiResponse<>(true, "Documents publics récupérés",
+                        documentService.getPublicDocuments()));
+    }
+
+    // ─── Suppression ──────────────────────────────────────────────────────────
+
+    @DeleteMapping("/{id}")
+    public ResponseEntity<ApiResponse<Void>> delete(@PathVariable Long id) throws IOException {
+        documentService.deleteDocument(id);
+        return ResponseEntity.ok(new ApiResponse<>(true, "Document supprimé", null));
     }
 }

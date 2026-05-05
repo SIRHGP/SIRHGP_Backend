@@ -23,11 +23,12 @@ public class FactureRequestDTO {
     @Future(message = "La date d'échéance doit être dans le futur")
     private LocalDate dateEcheance;
 
-    // CORRECTION : BigDecimal au lieu de Double pour éviter les erreurs d'arrondi
-    @NotNull @DecimalMin("0.0")
+    @NotNull(message = "Le montant HT est obligatoire")
+    @DecimalMin(value = "0.0", message = "Le montant HT doit être positif ou nul")
     private BigDecimal montantHT;
 
-    @NotNull @DecimalMin("0.0")
+    @NotNull(message = "Le montant TVA est obligatoire")
+    @DecimalMin(value = "0.0", message = "Le montant TVA doit être positif ou nul")
     private BigDecimal montantTVA;
 
     @NotNull(message = "Le type de facture est obligatoire")
@@ -36,7 +37,7 @@ public class FactureRequestDTO {
     @NotNull(message = "Le projet est obligatoire")
     private Long projetId;
 
-    // emetteurId extrait du token JWT — pas envoyé par le client
+    // Client (destinataire) - optionnel lors de la création, sera défini lors du dispatch
     private Long clientId;
 
     @Valid
