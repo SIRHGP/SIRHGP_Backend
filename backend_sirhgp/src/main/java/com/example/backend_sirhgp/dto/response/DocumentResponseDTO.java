@@ -1,40 +1,47 @@
 package com.example.backend_sirhgp.dto.response;
 
-import com.example.backend_sirhgp.model.Document;
+import com.example.backend_sirhgp.model.Document.DocumentStatus;
+import com.example.backend_sirhgp.model.Document.TypeDocument;
 import lombok.Data;
+
 import java.time.LocalDateTime;
 
-/**
- * CORRECTION : MultipartFile retiré — ce DTO est une réponse pure,
- * pas un DTO d'upload. Le téléchargement se fait via un endpoint
- * GET /documents/{id}/download qui retourne un Resource.
- */
 @Data
 public class DocumentResponseDTO {
-
     private Long id;
     private String nom;
     private String description;
-    private Document.TypeDocument type;
-    private boolean publique;
-
     private String nomFichier;
     private String typeMime;
     private Long taille;
     private String tailleFormatee;
     private String extension;
-    private LocalDateTime dateCreation;
-    private LocalDateTime dateModification;
+    private TypeDocument type;
+    private DocumentStatus status;
+    private boolean publique;
     private Long nombreTelechargements;
 
-    // Contexte — résumés seulement
+    // Infos expéditeur
+    private Long expediteurId;
+    private String expediteurNom;
+    private String expediteurEmail;
+
+    // Infos destinataire
+    private Long destinataireId;
+    private String destinataireNom;
+    private String destinataireEmail;
+
+    // Métadonnées de partage
+    private String message;
+    private boolean estLu;
+    private boolean estArchive;
+    private LocalDateTime dateCreation;
+    private LocalDateTime dateEnvoi;
+    private LocalDateTime dateLecture;
+
+    // Relations
     private Long employerId;
     private String employerNom;
-
-    private Long uploaderId;
-    private String uploaderNom;
-    private String uploaderEmail;
-
     private Long projetId;
     private String projetNom;
 }

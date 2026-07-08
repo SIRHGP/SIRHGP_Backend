@@ -7,9 +7,6 @@ import java.time.LocalDate;
 import java.time.LocalDateTime;
 import java.util.Set;
 
-/**
- * CORRECTION : Double → BigDecimal pour tous les montants.
- */
 @Data
 public class FactureResponseDTO {
 
@@ -20,7 +17,6 @@ public class FactureResponseDTO {
     private LocalDate dateEmission;
     private LocalDate dateEcheance;
 
-    // CORRECTION : BigDecimal
     private BigDecimal montantHT;
     private BigDecimal montantTVA;
     private BigDecimal montantTTC;
@@ -32,13 +28,19 @@ public class FactureResponseDTO {
     private LocalDateTime dateCreation;
     private LocalDateTime dateModification;
 
+    // Dispatch fields
+    private String message;
+    private boolean estConsultee;
+    private LocalDateTime dateEnvoi;
+    private LocalDateTime dateConsultation;
+
     // Références résumées
     private Long projetId;
     private String projetNom;
     private String projetCode;
 
-    private ProjetResponseDTO.EmployerSummaryDTO emetteur;
-    private ProjetResponseDTO.EmployerSummaryDTO client;
+    private EmployerSummaryDTO emetteur;
+    private EmployerSummaryDTO client;
 
     private Set<LigneFactureResponseDTO> lignesFacture;
 
@@ -48,4 +50,13 @@ public class FactureResponseDTO {
     private Boolean estEnRetard;
     private Long joursRestants;
     private Long delaiEmissionPaiement;
+
+    @Data
+    public static class EmployerSummaryDTO {
+        private Long id;
+        private String name;
+        private String email;
+        private String posteName;
+        private String departementNom;
+    }
 }

@@ -9,7 +9,7 @@ import org.springframework.stereotype.Component;
 
 @Generated(
     value = "org.mapstruct.ap.MappingProcessor",
-    date = "2026-04-13T11:29:20+0200",
+    date = "2026-05-08T06:06:42+0200",
     comments = "version: 1.5.5.Final, compiler: javac, environment: Java 17.0.18 (Microsoft)"
 )
 @Component
@@ -25,35 +25,40 @@ public class DocumentMapperImpl implements DocumentMapper {
 
         documentResponseDTO.setEmployerId( documentEmployerId( document ) );
         documentResponseDTO.setEmployerNom( documentEmployerName( document ) );
-        documentResponseDTO.setUploaderId( documentUploaderId( document ) );
-        documentResponseDTO.setUploaderNom( documentUploaderName( document ) );
-        documentResponseDTO.setUploaderEmail( documentUploaderEmail( document ) );
+        documentResponseDTO.setExpediteurId( documentExpediteurId( document ) );
+        documentResponseDTO.setExpediteurNom( documentExpediteurName( document ) );
+        documentResponseDTO.setExpediteurEmail( documentExpediteurEmail( document ) );
+        documentResponseDTO.setDestinataireId( documentDestinataireId( document ) );
+        documentResponseDTO.setDestinataireNom( documentDestinataireName( document ) );
+        documentResponseDTO.setDestinataireEmail( documentDestinataireEmail( document ) );
         documentResponseDTO.setProjetId( documentProjetId( document ) );
         documentResponseDTO.setProjetNom( documentProjetNom( document ) );
         documentResponseDTO.setId( document.getId() );
         documentResponseDTO.setNom( document.getNom() );
         documentResponseDTO.setDescription( document.getDescription() );
-        documentResponseDTO.setType( document.getType() );
-        documentResponseDTO.setPublique( document.isPublique() );
         documentResponseDTO.setNomFichier( document.getNomFichier() );
         documentResponseDTO.setTypeMime( document.getTypeMime() );
         documentResponseDTO.setTaille( document.getTaille() );
-        documentResponseDTO.setDateCreation( document.getDateCreation() );
-        documentResponseDTO.setDateModification( document.getDateModification() );
+        documentResponseDTO.setType( document.getType() );
+        documentResponseDTO.setStatus( document.getStatus() );
+        if ( document.getPublique() != null ) {
+            documentResponseDTO.setPublique( document.getPublique() );
+        }
         documentResponseDTO.setNombreTelechargements( document.getNombreTelechargements() );
+        documentResponseDTO.setMessage( document.getMessage() );
+        if ( document.getEstLu() != null ) {
+            documentResponseDTO.setEstLu( document.getEstLu() );
+        }
+        if ( document.getEstArchive() != null ) {
+            documentResponseDTO.setEstArchive( document.getEstArchive() );
+        }
+        documentResponseDTO.setDateCreation( document.getDateCreation() );
+        documentResponseDTO.setDateEnvoi( document.getDateEnvoi() );
+        documentResponseDTO.setDateLecture( document.getDateLecture() );
+
+        enrichResponseDTO( document, documentResponseDTO );
 
         return documentResponseDTO;
-    }
-
-    @Override
-    public void updateMetadonnees(Document entity, String nom, String description, boolean publique) {
-        if ( nom == null && description == null ) {
-            return;
-        }
-
-        entity.setNom( nom );
-        entity.setDescription( description );
-        entity.setPublique( publique );
     }
 
     private Long documentEmployerId(Document document) {
@@ -86,45 +91,90 @@ public class DocumentMapperImpl implements DocumentMapper {
         return name;
     }
 
-    private Long documentUploaderId(Document document) {
+    private Long documentExpediteurId(Document document) {
         if ( document == null ) {
             return null;
         }
-        Employer uploader = document.getUploader();
-        if ( uploader == null ) {
+        Employer expediteur = document.getExpediteur();
+        if ( expediteur == null ) {
             return null;
         }
-        Long id = uploader.getId();
+        Long id = expediteur.getId();
         if ( id == null ) {
             return null;
         }
         return id;
     }
 
-    private String documentUploaderName(Document document) {
+    private String documentExpediteurName(Document document) {
         if ( document == null ) {
             return null;
         }
-        Employer uploader = document.getUploader();
-        if ( uploader == null ) {
+        Employer expediteur = document.getExpediteur();
+        if ( expediteur == null ) {
             return null;
         }
-        String name = uploader.getName();
+        String name = expediteur.getName();
         if ( name == null ) {
             return null;
         }
         return name;
     }
 
-    private String documentUploaderEmail(Document document) {
+    private String documentExpediteurEmail(Document document) {
         if ( document == null ) {
             return null;
         }
-        Employer uploader = document.getUploader();
-        if ( uploader == null ) {
+        Employer expediteur = document.getExpediteur();
+        if ( expediteur == null ) {
             return null;
         }
-        String email = uploader.getEmail();
+        String email = expediteur.getEmail();
+        if ( email == null ) {
+            return null;
+        }
+        return email;
+    }
+
+    private Long documentDestinataireId(Document document) {
+        if ( document == null ) {
+            return null;
+        }
+        Employer destinataire = document.getDestinataire();
+        if ( destinataire == null ) {
+            return null;
+        }
+        Long id = destinataire.getId();
+        if ( id == null ) {
+            return null;
+        }
+        return id;
+    }
+
+    private String documentDestinataireName(Document document) {
+        if ( document == null ) {
+            return null;
+        }
+        Employer destinataire = document.getDestinataire();
+        if ( destinataire == null ) {
+            return null;
+        }
+        String name = destinataire.getName();
+        if ( name == null ) {
+            return null;
+        }
+        return name;
+    }
+
+    private String documentDestinataireEmail(Document document) {
+        if ( document == null ) {
+            return null;
+        }
+        Employer destinataire = document.getDestinataire();
+        if ( destinataire == null ) {
+            return null;
+        }
+        String email = destinataire.getEmail();
         if ( email == null ) {
             return null;
         }

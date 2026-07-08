@@ -1,7 +1,11 @@
 package com.example.backend_sirhgp.repository;
 
 import com.example.backend_sirhgp.model.Document;
+import com.example.backend_sirhgp.model.Document.DocumentStatus;
+import org.springframework.data.domain.Page;
+import org.springframework.data.domain.Pageable;
 import org.springframework.data.jpa.repository.JpaRepository;
+import org.springframework.data.jpa.repository.Modifying;
 import org.springframework.data.jpa.repository.Query;
 import org.springframework.data.repository.query.Param;
 import org.springframework.stereotype.Repository;
@@ -9,55 +13,121 @@ import org.springframework.stereotype.Repository;
 import java.util.List;
 import java.util.Optional;
 
-/**
- * CORRECTIONS :
- * - findByEmployer(Employer) et findByUploader(Employer) remplacés par leurs
- *   équivalents par ID — pas besoin de charger l'entité entière pour filtrer.
- * - Ajout de findByProjetId() — manquait alors que Document a une relation projet.
- * - Ajout de countByEmployerId() et countByProjetId() pour les stats des ResponseDTOs.
- * - Ajout de findByIdWithRelations() pour éviter N+1 lors du chargement d'un document.
- */
 @Repository
 public interface DocumentRepository extends JpaRepository<Document, Long> {
 
-    Optional<Document> findByNomFichier(String nomFichier);
-    boolean existsByNomFichier(String nomFichier);
+    // ─── Documents reçus par un employé ──────────────────────────────────────
+    @Query("""
+        SELECT d FROM Document d
+        WHERE d.destinataire.id = :employerId
+        AND d.status = :status
+        ORDER BY d.dateEnvoi DESC
+    """)
+    List<Document> findReceivedDocuments(@Param("employerId") Long employerId,
+                                         @Param("status") DocumentStatus status);
 
-    // ─── Filtres par ID (plus efficaces que par entité) ───────
+    @Query("""
+        SELECT d FROM Document d
+        WHERE d.destinataire.id = :employerId
+        AND d.estLu = false
+        AND d.status = :status
+        ORDER BY d.dateEnvoi DESC
+    """)
+    List<Document> findUnreadReceivedDocuments(@Param("employerId") Long employerId,
+                                               @Param("status") DocumentStatus status);
 
-    List<Document> findByEmployerId(Long employerId);
-    List<Document> findByUploaderId(Long uploaderId);
+    // ─── Documents envoyés par un employé ────────────────────────────────────
+    @Query("""
+        SELECT d FROM Document d
+        WHERE d.expediteur.id = :employerId
+        AND d.status = :status
+        ORDER BY d.dateEnvoi DESC
+    """)
+    List<Document> findSentDocuments(@Param("employerId") Long employerId,
+                                     @Param("status") DocumentStatus status);
 
-    // CORRECTION : manquait dans l'original
-    List<Document> findByProjetId(Long projetId);
+    // ─── Documents d'un utilisateur (expéditeur OU destinataire) ─────────────
+    @Query("""
+        SELECT d FROM Document d
+        WHERE (d.expediteur.id = :employerId OR d.destinataire.id = :employerId)
+        AND d.status = :status
+        ORDER BY d.dateEnvoi DESC
+    """)
+    Page<Document> findAllByUser(@Param("employerId") Long employerId,
+                                 @Param("status") DocumentStatus status,
+                                 Pageable pageable);
 
-    List<Document> findByType(Document.TypeDocument type);
+    // ─── Documents publics ────────────────────────────────────────────────────
+    @Query("""
+        SELECT d FROM Document d
+        WHERE d.publique = true
+        AND d.status = :status
+        AND d.destinataire IS NULL
+    """)
+    List<Document> findPublicDocuments(@Param("status") DocumentStatus status);
 
-    List<Document> findByPubliqueTrue();
+    // ─── Tous les documents par statut (admin) ────────────────────────────────
+    @Query("SELECT d FROM Document d WHERE d.status = :status")
+    Page<Document> findAllByStatus(@Param("status") DocumentStatus status, Pageable pageable);
 
-    // ─── Compteurs pour les ResponseDTOs (évite N+1) ──────────
-
-    long countByEmployerId(Long employerId);
-    long countByUploaderId(Long uploaderId);
-    long countByProjetId(Long projetId);
-
-    // ─── Chargement avec relations ────────────────────────────
-
-    /**
-     * Charge un document avec employer, uploader et projet en un seul SELECT.
-     * À utiliser dans DocumentService.getById() pour éviter les lazy loads en cascade.
-     */
-    @Query("SELECT d FROM Document d " +
-            "LEFT JOIN FETCH d.employer " +
-            "LEFT JOIN FETCH d.uploader " +
-            "LEFT JOIN FETCH d.projet " +
-            "WHERE d.id = :id")
+    // ─── Chargement avec relations ────────────────────────────────────────────
+    @Query("""
+        SELECT d FROM Document d
+        LEFT JOIN FETCH d.employer
+        LEFT JOIN FETCH d.expediteur
+        LEFT JOIN FETCH d.destinataire
+        LEFT JOIN FETCH d.projet
+        WHERE d.id = :id
+    """)
     Optional<Document> findByIdWithRelations(@Param("id") Long id);
 
-    /**
-     * Liste les documents publics d'un projet (pour affichage sans authentification).
-     */
-    @Query("SELECT d FROM Document d " +
-            "WHERE d.projet.id = :projetId AND d.publique = true")
-    List<Document> findPublicsByProjetId(@Param("projetId") Long projetId);
+    // ─── Vérification de références actives sur un fichier physique ───────────
+    // Remplace le findAll().stream() coûteux dans deleteDocument()
+    @Query("""
+        SELECT COUNT(d) FROM Document d
+        WHERE d.cheminStockage = :chemin
+        AND d.status <> :statusExclu
+        AND d.id <> :excludeId
+    """)
+    long countActiveByCheminStockage(@Param("chemin") String chemin,
+                                     @Param("statusExclu") DocumentStatus statusExclu,
+                                     @Param("excludeId") Long excludeId);
+
+    // ─── Filtres simples ──────────────────────────────────────────────────────
+    List<Document> findByEmployerId(Long employerId);
+    List<Document> findByProjetId(Long projetId);
+
+    // ─── Compteurs ───────────────────────────────────────────────────────────
+    long countByEmployerId(Long employerId);
+    long countByExpediteurId(Long expediteurId);
+    long countByProjetId(Long projetId);
+    long countByDestinataireIdAndEstLuFalseAndStatus(Long destinataireId, DocumentStatus status);
+    long countByExpediteurIdAndStatus(Long expediteurId, DocumentStatus status);
+
+    // ─── Marquer comme lu ────────────────────────────────────────────────────
+    @Modifying
+    @Query("""
+        UPDATE Document d SET d.estLu = true, d.dateLecture = CURRENT_TIMESTAMP
+        WHERE d.id = :documentId AND d.destinataire.id = :employerId
+    """)
+    void markAsRead(@Param("documentId") Long documentId,
+                    @Param("employerId") Long employerId);
+
+    // ─── Archiver ─────────────────────────────────────────────────────────────
+    @Modifying
+    @Query("UPDATE Document d SET d.estArchive = true WHERE d.id = :id")
+    void archiveDocument(@Param("id") Long id);
+
+    // ─── Vérification d'accès ─────────────────────────────────────────────────
+    @Query("""
+        SELECT COUNT(d) > 0 FROM Document d
+        WHERE d.id = :documentId
+        AND (d.expediteur.id = :employerId OR d.destinataire.id = :employerId OR d.publique = true)
+        AND d.status = :status
+    """)
+    boolean hasAccess(@Param("documentId") Long documentId,
+                      @Param("employerId") Long employerId,
+                      @Param("status") DocumentStatus status);
+
+    long countByCheminStockageAndStatusNot(String chemin, DocumentStatus documentStatus);
 }

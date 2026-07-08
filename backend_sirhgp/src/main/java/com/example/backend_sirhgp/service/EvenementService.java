@@ -27,14 +27,6 @@ import java.util.List;
 import java.util.Set;
 import java.util.stream.Collectors;
 
-/**
- * CORRECTIONS :
- * - EvenementRequestDTO / EvenementResponseDTO au lieu de l'ancien EvenementDTO.
- * - createurId extrait du JWT — pas du body client.
- * - findByParticipantsContaining(Employer) → findByParticipantId(Long).
- * - findAll() paginé.
- * - findByIdWithRelations() pour éviter N+1.
- */
 @Slf4j
 @Service
 @RequiredArgsConstructor
@@ -47,8 +39,8 @@ public class EvenementService {
 
     @Transactional
     public EvenementResponseDTO create(EvenementRequestDTO dto) {
-        // CORRECTION : créateur = utilisateur connecté
         Employer createur = getCurrentUser();
+        log.info("Création d'événement par utilisateur: {} (ID: {})", createur.getEmail(), createur.getId());
 
         Evenement event = evenementMapper.toEntity(dto);
         event.setCreateur(createur);
@@ -70,11 +62,11 @@ public class EvenementService {
         }
 
         Evenement saved = evenementRepository.save(event);
-        log.info("Événement créé : {} par {}", saved.getTitre(), createur.getEmail());
+        log.info("Événement créé : {} (ID: {}) par {}", saved.getTitre(), saved.getId(), createur.getEmail());
+
         return enrich(evenementMapper.toResponseDTO(saved), saved);
     }
 
-    // CORRECTION : pagination
     @Transactional(readOnly = true)
     public Page<EvenementResponseDTO> findAll(Pageable pageable) {
         return evenementRepository.findAll(pageable)
@@ -83,7 +75,6 @@ public class EvenementService {
 
     @Transactional(readOnly = true)
     public EvenementResponseDTO findById(Long id) {
-        // CORRECTION : findByIdWithRelations pour éviter N+1
         Evenement event = evenementRepository.findByIdWithRelations(id)
                 .orElseThrow(() -> new ResourceNotFoundException("Événement non trouvé : " + id));
         return enrich(evenementMapper.toResponseDTO(event), event);
@@ -98,7 +89,6 @@ public class EvenementService {
 
     @Transactional(readOnly = true)
     public List<EvenementResponseDTO> findByParticipantId(Long participantId) {
-        // CORRECTION : findByParticipantId(Long) au lieu de findByParticipantsContaining(Employer)
         return evenementRepository.findByParticipantId(participantId).stream()
                 .map(e -> enrich(evenementMapper.toResponseDTO(e), e))
                 .collect(Collectors.toList());
@@ -116,6 +106,20 @@ public class EvenementService {
         Evenement event = evenementRepository.findByIdWithRelations(id)
                 .orElseThrow(() -> new ResourceNotFoundException("Événement non trouvé : " + id));
 
+        // ⭐ VÉRIFICATION DES DROITS ⭐
+        Employer currentUser = getCurrentUser();
+        boolean isAdmin = isAdmin(currentUser);
+        boolean isCreator = event.getCreateur().getId().equals(currentUser.getId());
+
+        log.info("Tentative de modification - Événement ID: {}, Utilisateur: {}, isAdmin: {}, isCreator: {}",
+                id, currentUser.getEmail(), isAdmin, isCreator);
+
+        if (!isAdmin && !isCreator) {
+            log.warn("REFUSÉ - Utilisateur {} n'a pas les droits pour modifier l'événement {} (créateur: {})",
+                    currentUser.getEmail(), id, event.getCreateur().getEmail());
+            throw new SecurityException("Vous n'êtes pas autorisé à modifier cet événement. Seul le créateur peut le modifier.");
+        }
+
         evenementMapper.updateEntity(event, dto);
 
         if (dto.getParticipantsIds() != null) {
@@ -125,6 +129,7 @@ public class EvenementService {
                     .collect(Collectors.toSet());
             event.setParticipants(participants);
         }
+
         if (dto.getProjetId() != null) {
             Projet projet = projetRepository.findById(dto.getProjetId())
                     .orElseThrow(() -> new ResourceNotFoundException("Projet non trouvé : " + dto.getProjetId()));
@@ -134,21 +139,43 @@ public class EvenementService {
         }
 
         Evenement updated = evenementRepository.save(event);
+        log.info("Événement modifié : {} (ID: {}) par {}", updated.getTitre(), updated.getId(), currentUser.getEmail());
+
         return enrich(evenementMapper.toResponseDTO(updated), updated);
     }
 
     @Transactional
     public void delete(Long id) {
-        if (!evenementRepository.existsById(id)) {
-            throw new ResourceNotFoundException("Événement non trouvé : " + id);
+        Evenement event = evenementRepository.findByIdWithRelations(id)
+                .orElseThrow(() -> new ResourceNotFoundException("Événement non trouvé : " + id));
+
+        // ⭐ VÉRIFICATION DES DROITS ⭐
+        Employer currentUser = getCurrentUser();
+        boolean isAdmin = isAdmin(currentUser);
+        boolean isCreator = event.getCreateur().getId().equals(currentUser.getId());
+
+        log.info("Tentative de suppression - Événement ID: {}, Utilisateur: {}, isAdmin: {}, isCreator: {}",
+                id, currentUser.getEmail(), isAdmin, isCreator);
+
+        if (!isAdmin && !isCreator) {
+            log.warn("REFUSÉ - Utilisateur {} n'a pas les droits pour supprimer l'événement {} (créateur: {})",
+                    currentUser.getEmail(), id, event.getCreateur().getEmail());
+            throw new SecurityException("Vous n'êtes pas autorisé à supprimer cet événement. Seul le créateur peut le supprimer.");
         }
+
         evenementRepository.deleteById(id);
-        log.info("Événement supprimé : {}", id);
+        log.info("Événement supprimé : {} (ID: {}) par {}", event.getTitre(), id, currentUser.getEmail());
     }
 
-    // ─── Utilitaires ─────────────────────────────────────────
+    // ─── Méthodes utilitaires ─────────────────────────────────────────
 
     private EvenementResponseDTO enrich(EvenementResponseDTO dto, Evenement event) {
+        // ⭐ AJOUTER L'ID ET LE NOM DU CRÉATEUR ⭐
+        if (event.getCreateur() != null) {
+            dto.setCreateurId(event.getCreateur().getId());
+            dto.setCreateurNom(event.getCreateur().getName());
+        }
+
         LocalDate aujourd = LocalDate.now();
         dto.setEstPasse(event.getDateDebut().isBefore(aujourd));
         dto.setEstEnCours(!event.getDateDebut().isAfter(aujourd) &&
@@ -170,7 +197,16 @@ public class EvenementService {
 
     private Employer getCurrentUser() {
         Authentication auth = SecurityContextHolder.getContext().getAuthentication();
+        if (auth == null || !auth.isAuthenticated()) {
+            throw new SecurityException("Utilisateur non authentifié");
+        }
         return employerRepository.findByEmailWithRolesAndPoste(auth.getName())
-                .orElseThrow(() -> new ResourceNotFoundException("Utilisateur courant non trouvé"));
+                .orElseThrow(() -> new ResourceNotFoundException("Utilisateur courant non trouvé: " + auth.getName()));
+    }
+
+    private boolean isAdmin(Employer user) {
+        if (user == null || user.getRole() == null) return false;
+        String roleName = user.getRole().getName();
+        return "SUPER_ADMIN".equals(roleName) || "ADMIN".equals(roleName);
     }
 }

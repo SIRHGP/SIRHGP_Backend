@@ -14,22 +14,13 @@ import java.util.HashSet;
 import java.util.Set;
 import java.util.UUID;
 
-/**
- * Facture émise ou reçue dans le cadre d'un projet.
- *
- * CORRECTIONS :
- * - Double → BigDecimal sur tous les montants financiers.
- * - calculerMontants() utilise BigDecimal pour éviter les bugs d'arrondi.
- *   La comparaison >= sur Double pour tester le paiement complet est un bug
- *   classique : 100.0 >= 100.0 peut être false à cause de l'imprécision flottante.
- * - setProjet() supprimé — code mort généré par Lombok @Setter.
- * - numeroFacture généré avec un format lisible + UUID court pour garantir l'unicité
- *   en cas d'appels parallèles (System.currentTimeMillis() ne suffit pas).
- * - @EqualsAndHashCode(callSuper = false) → onlyExplicitlyIncluded = true.
- * - StatutFacture.EN_RETARD ajouté en cohérence avec les DTOs dashboard.
- */
 @Entity
-@Table(name = "factures")
+@Table(name = "factures", indexes = {
+        @Index(name = "idx_facture_client_id", columnList = "client_id"),
+        @Index(name = "idx_facture_emetteur_id", columnList = "emetteur_id"),
+        @Index(name = "idx_facture_statut", columnList = "statut"),
+        @Index(name = "idx_facture_est_consultee", columnList = "est_consultee")
+})
 @Getter
 @Setter
 @NoArgsConstructor
@@ -58,7 +49,6 @@ public class Facture {
 
     private LocalDate dateEcheance;
 
-    // CORRECTION : BigDecimal pour tous les montants
     @Column(nullable = false, precision = 15, scale = 2)
     private BigDecimal montantHT;
 
@@ -86,6 +76,20 @@ public class Facture {
     @Enumerated(EnumType.STRING)
     private TypeFacture typeFacture;
 
+    // ─── Dispatch (envoi au client) ───────────────────────────────────────────
+    @Builder.Default
+    private boolean estConsultee = false;
+
+    @Column(name = "date_consultation")
+    private LocalDateTime dateConsultation;
+
+    @Column(columnDefinition = "TEXT")
+    private String message;
+
+    @Column(name = "date_envoi")
+    private LocalDateTime dateEnvoi;
+
+    // ─── Relations ────────────────────────────────────────────────────────────
     @ManyToOne(fetch = FetchType.LAZY)
     @JoinColumn(name = "projet_id")
     private Projet projet;
@@ -133,29 +137,18 @@ public class Facture {
         calculerMontants();
     }
 
-    /**
-     * CORRECTION : calculs avec BigDecimal.
-     * La comparaison >= sur Double (version originale) provoque des bugs
-     * d'arrondi : ex. 100.001 >= 100.0 peut donner un faux résultat.
-     * BigDecimal.compareTo() est la bonne approche pour les comparaisons financières.
-     */
     public void calculerMontants() {
-        // Somme des lignes
         this.montantHT = this.lignesFacture.stream()
                 .map(LigneFacture::getMontantTotal)
                 .reduce(BigDecimal.ZERO, BigDecimal::add)
                 .setScale(2, RoundingMode.HALF_UP);
 
-        // TVA déjà fixée, on recalcule le TTC
         if (this.montantTVA == null) this.montantTVA = BigDecimal.ZERO;
         this.montantTTC = this.montantHT.add(this.montantTVA).setScale(2, RoundingMode.HALF_UP);
 
-        // Restant
         if (this.montantPaye == null) this.montantPaye = BigDecimal.ZERO;
         this.montantRestant = this.montantTTC.subtract(this.montantPaye).setScale(2, RoundingMode.HALF_UP);
 
-        // Mise à jour du statut de paiement
-        // CORRECTION : compareTo() au lieu de >= sur Double
         int comparePaye = this.montantPaye.compareTo(this.montantTTC);
         if (comparePaye >= 0) {
             this.statut = StatutFacture.PAYEE;
@@ -163,7 +156,6 @@ public class Facture {
             this.statut = StatutFacture.PARTIELLEMENT_PAYEE;
         }
 
-        // Vérification retard
         if (this.dateEcheance != null
                 && this.dateEcheance.isBefore(LocalDate.now())
                 && this.montantRestant.compareTo(BigDecimal.ZERO) > 0
@@ -173,11 +165,15 @@ public class Facture {
         }
     }
 
-    /**
-     * CORRECTION : numeroFacture généré avec UUID court pour garantir l'unicité
-     * même en cas d'appels simultanés.
-     * Format : FACT-YYYYMM-XXXXXXXX (ex: FACT-202501-A3F2B1C0)
-     */
+    public void marquerCommeConsultee() {
+        this.estConsultee = true;
+        this.dateConsultation = LocalDateTime.now();
+    }
+
+    public boolean estEnvoyee() {
+        return this.client != null && this.dateEnvoi != null;
+    }
+
     @PrePersist
     @PreUpdate
     public void prePersist() {

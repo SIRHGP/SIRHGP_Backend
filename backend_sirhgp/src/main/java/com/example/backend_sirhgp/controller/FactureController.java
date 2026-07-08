@@ -1,5 +1,6 @@
 package com.example.backend_sirhgp.controller;
 
+import com.example.backend_sirhgp.dto.request.FactureDispatchRequestDTO;
 import com.example.backend_sirhgp.dto.request.FactureRequestDTO;
 import com.example.backend_sirhgp.dto.response.FactureResponseDTO;
 import com.example.backend_sirhgp.model.Facture;
@@ -16,21 +17,14 @@ import org.springframework.web.bind.annotation.*;
 import java.math.BigDecimal;
 import java.util.List;
 
-/**
- * CORRECTIONS :
- * - FactureRequestDTO / FactureResponseDTO au lieu de FactureDTO.
- * - @Autowired remplacé par @RequiredArgsConstructor.
- * - enregistrerPaiement() reçoit BigDecimal au lieu de Double.
- * - findByProjet() → findByProjetId() (renommé dans le service).
- * - try/catch supprimés — GlobalExceptionHandler gère tout.
- * - findAll() paginé.
- */
 @RestController
 @RequestMapping("/api/factures")
 @RequiredArgsConstructor
 public class FactureController {
 
     private final FactureService factureService;
+
+    // ─── CRUD de base ─────────────────────────────────────────────────────────
 
     @PostMapping
     public ResponseEntity<ApiResponse<FactureResponseDTO>> create(
@@ -54,7 +48,6 @@ public class FactureController {
                         factureService.findById(id)));
     }
 
-    // CORRECTION : findByProjetId (renommé dans le service)
     @GetMapping("/by-projet/{projetId}")
     public ResponseEntity<ApiResponse<List<FactureResponseDTO>>> getByProjet(
             @PathVariable Long projetId) {
@@ -81,7 +74,6 @@ public class FactureController {
                         factureService.updateStatut(id, statut)));
     }
 
-    // CORRECTION : BigDecimal au lieu de Double
     @PatchMapping("/{id}/paiement")
     public ResponseEntity<ApiResponse<FactureResponseDTO>> enregistrerPaiement(
             @PathVariable Long id,
@@ -96,5 +88,43 @@ public class FactureController {
         factureService.delete(id);
         return ResponseEntity.ok(
                 new ApiResponse<>(true, "Facture supprimée avec succès", null));
+    }
+
+    // ─── DISPATCH (ENVOI AU CLIENT) ───────────────────────────────────────────
+
+    @PostMapping("/{id}/dispatch")
+    public ResponseEntity<ApiResponse<FactureResponseDTO>> dispatch(
+            @PathVariable Long id,
+            @Valid @RequestBody FactureDispatchRequestDTO dto) {
+        return ResponseEntity.ok(
+                new ApiResponse<>(true, "Facture envoyée au client avec succès",
+                        factureService.dispatchToClient(id, dto)));
+    }
+
+    @PatchMapping("/{id}/consult")
+    public ResponseEntity<ApiResponse<Void>> markAsConsulted(@PathVariable Long id) {
+        factureService.markAsConsulted(id);
+        return ResponseEntity.ok(new ApiResponse<>(true, "Facture marquée comme consultée", null));
+    }
+
+    @GetMapping("/received")
+    public ResponseEntity<ApiResponse<List<FactureResponseDTO>>> getReceivedFactures() {
+        return ResponseEntity.ok(
+                new ApiResponse<>(true, "Factures reçues récupérées",
+                        factureService.getReceivedFactures()));
+    }
+
+    @GetMapping("/unconsulted")
+    public ResponseEntity<ApiResponse<List<FactureResponseDTO>>> getUnconsultedFactures() {
+        return ResponseEntity.ok(
+                new ApiResponse<>(true, "Factures non consultées récupérées",
+                        factureService.getUnconsultedFactures()));
+    }
+
+    @GetMapping("/sent")
+    public ResponseEntity<ApiResponse<List<FactureResponseDTO>>> getSentFactures() {
+        return ResponseEntity.ok(
+                new ApiResponse<>(true, "Factures envoyées récupérées",
+                        factureService.getSentFactures()));
     }
 }

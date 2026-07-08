@@ -26,14 +26,18 @@ public class EvenementResponseDTO {
     private LocalDateTime dateCreation;
     private LocalDateTime dateModification;
 
-    // Créateur : résumé
-    private ProjetResponseDTO.EmployerSummaryDTO createur;
+    // ⭐ CHAMPS AJOUTÉS POUR LE FRONTEND ⭐
+    private Long createurId;        // ID du créateur (pour comparaison)
+    private String createurNom;     // Nom du créateur (pour affichage)
+
+    // Créateur : résumé complet
+    private EmployerSummaryDTO createur;
 
     // Participants : résumés
-    private Set<ProjetResponseDTO.EmployerSummaryDTO> participants;
+    private Set<EmployerSummaryDTO> participants;
 
     // Projet lié : résumé
-    private TacheResponseDTO.ProjetSummaryDTO projet;
+    private ProjetSummaryDTO projet;
 
     // Indicateurs calculés
     private Long nombreParticipants;
@@ -41,4 +45,22 @@ public class EvenementResponseDTO {
     private Boolean estEnCours;
     private Boolean estAvenir;
     private Long dureeMinutes;
+
+    // ─── DTOs internes ─────────────────────────────────────────
+
+    @Data
+    public static class EmployerSummaryDTO {
+        private Long id;
+        private String name;
+        private String email;
+        private String posteName;
+        private String departementNom;
+    }
+
+    @Data
+    public static class ProjetSummaryDTO {
+        private Long id;
+        private String nom;
+        private String codeProjet;
+    }
 }
