@@ -15,7 +15,6 @@ import com.example.backend_sirhgp.repository.EmployerRepository;
 import com.example.backend_sirhgp.repository.ProjetRepository;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
-import org.apache.commons.io.FileUtils;
 import org.apache.commons.io.FilenameUtils;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.context.ApplicationEventPublisher;
@@ -50,78 +49,59 @@ public class DocumentService {
     @Value("${app.upload.dir:uploads}")
     private String uploadDir;
 
-    // ─── Upload avec dispatch immédiat (optionnel) ─────────────────────────────
-
+    // ─── Upload + dispatch OBLIGATOIRE ────────────────────────────────────────
+    // Crée UN SEUL document avec expediteur + destinataire. Pas de clonage.
+    // Le super admin ne peut pas être destinataire mais peut envoyer.
     @Transactional
     public DocumentResponseDTO uploadWithDispatch(DocumentRequestDTO dto,
                                                   MultipartFile fichier) throws IOException {
         Employer expediteur = getCurrentUser();
+
+        if (dto.getDestinataireId() == null) {
+            throw new IllegalArgumentException("Un destinataire est obligatoire lors de l'upload");
+        }
+
         validateFile(fichier);
 
-        // Sauvegarde physique
-        Path filePath = savePhysicalFile(fichier);
-        String uniqueName = filePath.getFileName().toString();
+        Employer destinataire = employerRepository.findById(dto.getDestinataireId())
+                .orElseThrow(() -> new ResourceNotFoundException("Destinataire non trouvé: " + dto.getDestinataireId()));
 
-        // Construction du document
-        Document.DocumentBuilder builder = Document.builder()
+        if (isSuperAdmin(destinataire)) {
+            throw new IllegalArgumentException("Impossible d'envoyer un document au Super Administrateur");
+        }
+
+        Path filePath = savePhysicalFile(fichier);
+
+        Document document = Document.builder()
                 .nom(dto.getNom())
                 .description(dto.getDescription())
                 .type(dto.getType())
-                .publique(dto.isPublique())
-                .nomFichier(uniqueName)
+                .publique(false)
+                .nomFichier(filePath.getFileName().toString())
                 .cheminStockage(filePath.toAbsolutePath().toString())
                 .typeMime(fichier.getContentType())
                 .taille(fichier.getSize())
                 .expediteur(expediteur)
+                .destinataire(destinataire)
+                .dateEnvoi(LocalDateTime.now())
                 .nombreTelechargements(0L)
-                .status(DocumentStatus.ACTIF);
+                .status(DocumentStatus.ACTIF)
+                .build();
 
-        Employer destinataire = null;
+        Document saved = documentRepository.save(document);
 
-        // Si un destinataire est spécifié, dispatch immédiat
-        if (dto.getDestinataireId() != null) {
-            destinataire = employerRepository.findById(dto.getDestinataireId())
-                    .orElseThrow(() -> new ResourceNotFoundException("Destinataire non trouvé: " + dto.getDestinataireId()));
+        eventPublisher.publishEvent(new DocumentDispatchedEvent(
+                this, saved, expediteur, destinataire, null));
 
-            // Vérification: ne pas envoyer au super admin
-            if (isSuperAdmin(destinataire)) {
-                throw new IllegalArgumentException("Impossible d'envoyer un document au Super Administrateur");
-            }
-
-            builder.destinataire(destinataire)
-                    .message(dto.getMessage())
-                    .dateEnvoi(LocalDateTime.now());
-        }
-
-        // Associations optionnelles
-        if (dto.getEmployerId() != null) {
-            builder.employer(employerRepository.findById(dto.getEmployerId())
-                    .orElseThrow(() -> new ResourceNotFoundException("Employé non trouvé: " + dto.getEmployerId())));
-        }
-        if (dto.getProjetId() != null) {
-            builder.projet(projetRepository.findById(dto.getProjetId())
-                    .orElseThrow(() -> new ResourceNotFoundException("Projet non trouvé: " + dto.getProjetId())));
-        }
-
-        Document saved = documentRepository.save(builder.build());
-
-        // Publier l'événement de dispatch si un destinataire existe
-        if (destinataire != null) {
-            eventPublisher.publishEvent(new DocumentDispatchedEvent(
-                    this, saved, expediteur, destinataire, dto.getMessage()));
-            log.info("📨 Événement de dispatch publié pour le document {} vers {}",
-                    saved.getNom(), destinataire.getEmail());
-        }
-
-        log.info("Document uploadé et dispatché: {} par {} -> {}",
-                saved.getNom(), expediteur.getEmail(),
-                dto.getDestinataireId() != null ? "destinataire " + dto.getDestinataireId() : "aucun destinataire");
+        log.info("Document '{}' uploadé et dispatché par {} → {}",
+                saved.getNom(), expediteur.getEmail(), destinataire.getEmail());
 
         return documentMapper.toResponseDTO(saved);
     }
 
-    // ─── Transfert d'un document existant vers un autre employé ───────────────
-
+    // ─── Redispatch d'un document existant (SANS clonage) ────────────────────
+    // On met à jour le destinataire sur le même enregistrement.
+    // L'expéditeur devient l'utilisateur qui redispatche, traçant la chaîne.
     @Transactional
     public DocumentResponseDTO transferDocument(Long documentId, DocumentTransferRequestDTO dto) {
         Employer expediteur = getCurrentUser();
@@ -129,91 +109,66 @@ public class DocumentService {
         Document document = documentRepository.findByIdWithRelations(documentId)
                 .orElseThrow(() -> new ResourceNotFoundException("Document non trouvé: " + documentId));
 
-        // Vérifier que l'utilisateur est l'expéditeur ou le destinataire actuel
-        if (!document.appartientA(expediteur.getId())) {
-            throw new UnauthorizedException("Vous n'êtes pas autorisé à transférer ce document");
+        if (!document.appartientA(expediteur.getId()) && !isAdminOrManager(expediteur)) {
+            throw new UnauthorizedException("Vous n'êtes pas autorisé à dispatcher ce document");
         }
 
         Employer nouveauDestinataire = employerRepository.findById(dto.getDestinataireId())
                 .orElseThrow(() -> new ResourceNotFoundException("Destinataire non trouvé: " + dto.getDestinataireId()));
 
-        // Vérification: ne pas envoyer au super admin
         if (isSuperAdmin(nouveauDestinataire)) {
             throw new IllegalArgumentException("Impossible de transférer un document au Super Administrateur");
         }
 
-        // Créer une nouvelle instance du document pour le destinataire
-        Document newDocument = Document.builder()
-                .nom(document.getNom())
-                .description(document.getDescription())
-                .type(document.getType())
-                .publique(false)
-                .nomFichier(document.getNomFichier())
-                .cheminStockage(document.getCheminStockage())
-                .typeMime(document.getTypeMime())
-                .taille(document.getTaille())
-                .expediteur(expediteur)
-                .destinataire(nouveauDestinataire)
-                .message(dto.getMessage())
-                .employer(document.getEmployer())
-                .projet(document.getProjet())
-                .nombreTelechargements(0L)
-                .status(DocumentStatus.ACTIF)
-                .dateEnvoi(LocalDateTime.now())
-                .build();
+        // Mise à jour en place — zéro doublon
+        document.setExpediteur(expediteur);
+        document.setDestinataire(nouveauDestinataire);
+        document.setDateEnvoi(LocalDateTime.now());
+        document.setEstLu(false);
+        document.setDateLecture(null);
+        document.setStatus(DocumentStatus.ACTIF);
 
-        Document saved = documentRepository.save(newDocument);
+        Document saved = documentRepository.save(document);
 
-        // Publier l'événement de dispatch
         eventPublisher.publishEvent(new DocumentDispatchedEvent(
-                this, saved, expediteur, nouveauDestinataire, dto.getMessage()));
+                this, saved, expediteur, nouveauDestinataire, null));
 
-        log.info("Document {} transféré de {} à {}", documentId, expediteur.getEmail(), nouveauDestinataire.getEmail());
+        log.info("Document {} redispatché de {} à {}", documentId,
+                expediteur.getEmail(), nouveauDestinataire.getEmail());
 
         return documentMapper.toResponseDTO(saved);
     }
 
-    // ─── Récupérer les métadonnées d'un document ──────────────────────────────
-
+    // ─── Métadonnées ─────────────────────────────────────────────────────────
     @Transactional(readOnly = true)
     public DocumentResponseDTO getDocumentMetadata(Long id) {
-        Document document = documentRepository.findByIdWithRelations(id)
-                .orElseThrow(() -> new ResourceNotFoundException("Document non trouvé: " + id));
-        return documentMapper.toResponseDTO(document);
+        return documentMapper.toResponseDTO(
+                documentRepository.findByIdWithRelations(id)
+                        .orElseThrow(() -> new ResourceNotFoundException("Document non trouvé: " + id)));
     }
 
-    // ─── Récupérer les documents reçus par un employé ─────────────────────────
-
+    // ─── Documents reçus ─────────────────────────────────────────────────────
     @Transactional(readOnly = true)
     public List<DocumentResponseDTO> getReceivedDocuments(Long employerId) {
         return documentRepository.findReceivedDocuments(employerId, DocumentStatus.ACTIF)
-                .stream()
-                .map(documentMapper::toResponseDTO)
-                .collect(Collectors.toList());
+                .stream().map(documentMapper::toResponseDTO).collect(Collectors.toList());
     }
 
-    // ─── Récupérer les documents non lus ──────────────────────────────────────
-
+    // ─── Documents non lus ───────────────────────────────────────────────────
     @Transactional(readOnly = true)
     public List<DocumentResponseDTO> getUnreadDocuments(Long employerId) {
         return documentRepository.findUnreadReceivedDocuments(employerId, DocumentStatus.ACTIF)
-                .stream()
-                .map(documentMapper::toResponseDTO)
-                .collect(Collectors.toList());
+                .stream().map(documentMapper::toResponseDTO).collect(Collectors.toList());
     }
 
-    // ─── Récupérer les documents envoyés par un employé ───────────────────────
-
+    // ─── Documents envoyés ───────────────────────────────────────────────────
     @Transactional(readOnly = true)
     public List<DocumentResponseDTO> getSentDocuments(Long employerId) {
         return documentRepository.findSentDocuments(employerId, DocumentStatus.ACTIF)
-                .stream()
-                .map(documentMapper::toResponseDTO)
-                .collect(Collectors.toList());
+                .stream().map(documentMapper::toResponseDTO).collect(Collectors.toList());
     }
 
-    // ─── Récupérer tous les documents d'un utilisateur (avec pagination) ─────
-
+    // ─── Mes documents (expéditeur OU destinataire) ───────────────────────────
     @Transactional(readOnly = true)
     public Page<DocumentResponseDTO> getMyDocuments(Pageable pageable) {
         Employer currentUser = getCurrentUser();
@@ -221,51 +176,60 @@ public class DocumentService {
                 .map(documentMapper::toResponseDTO);
     }
 
-    // ─── Marquer un document comme lu ─────────────────────────────────────────
+    // ─── Tous les documents (admins voient tout, autres voient les leurs) ─────
+    @Transactional(readOnly = true)
+    public Page<DocumentResponseDTO> getAllDocuments(Pageable pageable) {
+        Employer currentUser = getCurrentUser();
+        if (isAdminOrManager(currentUser) || isSuperAdmin(currentUser)) {
+            return documentRepository.findAllByStatus(DocumentStatus.ACTIF, pageable)
+                    .map(documentMapper::toResponseDTO);
+        }
+        return documentRepository.findAllByUser(currentUser.getId(), DocumentStatus.ACTIF, pageable)
+                .map(documentMapper::toResponseDTO);
+    }
 
+    // ─── Marquer comme lu ────────────────────────────────────────────────────
     @Transactional
     public void markAsRead(Long documentId) {
         Employer currentUser = getCurrentUser();
         Document document = documentRepository.findById(documentId)
                 .orElseThrow(() -> new ResourceNotFoundException("Document non trouvé: " + documentId));
 
-        if (document.getDestinataire() == null || !document.getDestinataire().getId().equals(currentUser.getId())) {
+        if (document.getDestinataire() == null ||
+                !document.getDestinataire().getId().equals(currentUser.getId())) {
             throw new UnauthorizedException("Vous n'êtes pas le destinataire de ce document");
         }
-
         document.marquerCommeLu();
         documentRepository.save(document);
-        log.info("Document {} marqué comme lu par {}", documentId, currentUser.getEmail());
     }
 
-    // ─── Archiver un document ─────────────────────────────────────────────────
-
+    // ─── Archiver ────────────────────────────────────────────────────────────
     @Transactional
     public void archiveDocument(Long documentId) {
         Employer currentUser = getCurrentUser();
         Document document = documentRepository.findById(documentId)
                 .orElseThrow(() -> new ResourceNotFoundException("Document non trouvé: " + documentId));
 
-        if (!document.appartientA(currentUser.getId())) {
+        if (!document.appartientA(currentUser.getId()) && !isAdminOrManager(currentUser)) {
             throw new UnauthorizedException("Vous n'êtes pas autorisé à archiver ce document");
         }
-
         document.setEstArchive(true);
         documentRepository.save(document);
-        log.info("Document {} archivé par {}", documentId, currentUser.getEmail());
     }
 
-    // ─── Télécharger un document (avec incrément du compteur) ─────────────────
-
+    // ─── Télécharger ─────────────────────────────────────────────────────────
+    // Accès : expéditeur, destinataire, admin, manager, super_admin
     @Transactional
     public byte[] downloadDocument(Long id) throws IOException {
         Employer currentUser = getCurrentUser();
-
         Document document = documentRepository.findByIdWithRelations(id)
                 .orElseThrow(() -> new ResourceNotFoundException("Document non trouvé: " + id));
 
-        // Vérifier l'accès
-        if (!document.isPublique() && !document.appartientA(currentUser.getId())) {
+        boolean hasAccess = document.appartientA(currentUser.getId())
+                || isAdminOrManager(currentUser)
+                || isSuperAdmin(currentUser);
+
+        if (!hasAccess) {
             throw new UnauthorizedException("Vous n'avez pas accès à ce document");
         }
 
@@ -276,33 +240,57 @@ public class DocumentService {
 
         document.incrementerTelechargements();
         documentRepository.save(document);
-
         return Files.readAllBytes(filePath);
     }
 
-    // ─── Supprimer un document (soft delete) ──────────────────────────────────
+    // ─── Modifier les métadonnées ─────────────────────────────────────────────
+    @Transactional
+    public DocumentResponseDTO updateDocument(Long id, DocumentRequestDTO dto) {
+        Employer currentUser = getCurrentUser();
+        Document document = documentRepository.findByIdWithRelations(id)
+                .orElseThrow(() -> new ResourceNotFoundException("Document non trouvé: " + id));
 
+        boolean canEdit = document.getExpediteur().getId().equals(currentUser.getId())
+                || isAdminOrManager(currentUser)
+                || isSuperAdmin(currentUser);
+
+        if (!canEdit) {
+            throw new UnauthorizedException("Vous n'êtes pas autorisé à modifier ce document");
+        }
+
+        document.setNom(dto.getNom());
+        document.setDescription(dto.getDescription());
+        document.setType(dto.getType());
+
+        Document saved = documentRepository.save(document);
+        log.info("Document {} mis à jour par {}", id, currentUser.getEmail());
+        return documentMapper.toResponseDTO(saved);
+    }
+
+    // ─── Supprimer (soft delete) ──────────────────────────────────────────────
     @Transactional
     public void deleteDocument(Long id) throws IOException {
         Employer currentUser = getCurrentUser();
-        Document document = documentRepository.findById(id)
+        Document document = documentRepository.findByIdWithRelations(id)
                 .orElseThrow(() -> new ResourceNotFoundException("Document non trouvé: " + id));
 
-        // Seul l'expéditeur peut supprimer définitivement
-        if (!document.getExpediteur().getId().equals(currentUser.getId())) {
-            throw new UnauthorizedException("Seul l'expéditeur peut supprimer ce document");
+        boolean canDelete = document.getExpediteur().getId().equals(currentUser.getId())
+                || document.appartientA(currentUser.getId())
+                || isAdminOrManager(currentUser)
+                || isSuperAdmin(currentUser);
+
+        if (!canDelete) {
+            throw new UnauthorizedException("Vous n'êtes pas autorisé à supprimer ce document");
         }
 
+        String chemin = document.getCheminStockage();
         document.setStatus(DocumentStatus.SUPPRIME);
         documentRepository.save(document);
 
-        // Supprimer le fichier physique si plus aucune référence active
-        boolean hasOtherReferences = documentRepository.findAll().stream()
-                .anyMatch(d -> d.getCheminStockage().equals(document.getCheminStockage())
-                        && d.getStatus() != DocumentStatus.SUPPRIME);
-
-        if (!hasOtherReferences) {
-            Path filePath = Paths.get(document.getCheminStockage());
+        // Supprimer physiquement seulement s'il n'y a plus de référence active
+        long otherRefs = documentRepository.countByCheminStockageAndStatusNot(chemin, DocumentStatus.SUPPRIME);
+        if (otherRefs == 0) {
+            Path filePath = Paths.get(chemin);
             if (Files.exists(filePath)) {
                 Files.delete(filePath);
                 log.info("Fichier physique supprimé: {}", filePath);
@@ -312,25 +300,20 @@ public class DocumentService {
         log.info("Document {} supprimé par {}", id, currentUser.getEmail());
     }
 
-    // ─── Récupérer les documents publics ──────────────────────────────────────
-
+    // ─── Documents publics ────────────────────────────────────────────────────
     @Transactional(readOnly = true)
     public List<DocumentResponseDTO> getPublicDocuments() {
         return documentRepository.findPublicDocuments(DocumentStatus.ACTIF)
-                .stream()
-                .map(documentMapper::toResponseDTO)
-                .collect(Collectors.toList());
+                .stream().map(documentMapper::toResponseDTO).collect(Collectors.toList());
     }
 
-    // ─── Récupérer le nombre de documents non lus ─────────────────────────────
-
+    // ─── Compteur non lus ────────────────────────────────────────────────────
     @Transactional(readOnly = true)
     public long getUnreadCount(Long employerId) {
         return documentRepository.countByDestinataireIdAndEstLuFalseAndStatus(employerId, DocumentStatus.ACTIF);
     }
 
     // ─── Utilitaires privés ───────────────────────────────────────────────────
-
     private void validateFile(MultipartFile fichier) {
         if (fichier == null || fichier.isEmpty())
             throw new IllegalArgumentException("Aucun fichier fourni");
@@ -344,12 +327,10 @@ public class DocumentService {
     private Path savePhysicalFile(MultipartFile fichier) throws IOException {
         Path uploadPath = Paths.get(uploadDir);
         if (!Files.exists(uploadPath)) Files.createDirectories(uploadPath);
-
         String extension = FilenameUtils.getExtension(fichier.getOriginalFilename());
         String uniqueName = UUID.randomUUID() + "." + extension;
         Path filePath = uploadPath.resolve(uniqueName);
         Files.copy(fichier.getInputStream(), filePath);
-
         return filePath;
     }
 
@@ -362,5 +343,11 @@ public class DocumentService {
     private boolean isSuperAdmin(Employer employer) {
         return employer.getRole() != null &&
                 "SUPER_ADMIN".equalsIgnoreCase(employer.getRole().getName());
+    }
+
+    private boolean isAdminOrManager(Employer employer) {
+        if (employer.getRole() == null) return false;
+        String role = employer.getRole().getName();
+        return "ADMIN".equalsIgnoreCase(role) || "MANAGER".equalsIgnoreCase(role);
     }
 }

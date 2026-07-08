@@ -9,7 +9,7 @@ import org.springframework.stereotype.Component;
 
 @Generated(
     value = "org.mapstruct.ap.MappingProcessor",
-    date = "2026-05-05T09:21:42+0200",
+    date = "2026-05-08T06:06:42+0200",
     comments = "version: 1.5.5.Final, compiler: javac, environment: Java 17.0.18 (Microsoft)"
 )
 @Component
@@ -41,11 +41,17 @@ public class DocumentMapperImpl implements DocumentMapper {
         documentResponseDTO.setTaille( document.getTaille() );
         documentResponseDTO.setType( document.getType() );
         documentResponseDTO.setStatus( document.getStatus() );
-        documentResponseDTO.setPublique( document.isPublique() );
+        if ( document.getPublique() != null ) {
+            documentResponseDTO.setPublique( document.getPublique() );
+        }
         documentResponseDTO.setNombreTelechargements( document.getNombreTelechargements() );
         documentResponseDTO.setMessage( document.getMessage() );
-        documentResponseDTO.setEstLu( document.isEstLu() );
-        documentResponseDTO.setEstArchive( document.isEstArchive() );
+        if ( document.getEstLu() != null ) {
+            documentResponseDTO.setEstLu( document.getEstLu() );
+        }
+        if ( document.getEstArchive() != null ) {
+            documentResponseDTO.setEstArchive( document.getEstArchive() );
+        }
         documentResponseDTO.setDateCreation( document.getDateCreation() );
         documentResponseDTO.setDateEnvoi( document.getDateEnvoi() );
         documentResponseDTO.setDateLecture( document.getDateLecture() );

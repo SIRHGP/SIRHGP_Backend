@@ -50,9 +50,9 @@ public class Document {
     @Builder.Default
     private DocumentStatus status = DocumentStatus.ACTIF;
 
-    // Visibilité
+    // Visibilité - CHANGÉ de boolean à Boolean
     @Builder.Default
-    private boolean publique = false;
+    private Boolean publique = false;
 
     @Builder.Default
     private Long nombreTelechargements = 0L;
@@ -68,11 +68,11 @@ public class Document {
 
     @Column(name = "est_lu")
     @Builder.Default
-    private boolean estLu = false;
+    private Boolean estLu = false;  // CHANGÉ de boolean à Boolean
 
     @Column(name = "est_archive")
     @Builder.Default
-    private boolean estArchive = false;
+    private Boolean estArchive = false;  // CHANGÉ de boolean à Boolean
 
     private String message;
 

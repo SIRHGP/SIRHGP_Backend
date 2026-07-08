@@ -6,6 +6,7 @@ import lombok.RequiredArgsConstructor;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
+import org.springframework.core.Ordered;
 import org.springframework.security.authentication.AuthenticationManager;
 import org.springframework.security.authentication.ProviderManager;
 import org.springframework.security.authentication.dao.DaoAuthenticationProvider;
@@ -20,6 +21,9 @@ import org.springframework.security.web.authentication.UsernamePasswordAuthentic
 import org.springframework.web.cors.CorsConfiguration;
 import org.springframework.web.cors.CorsConfigurationSource;
 import org.springframework.web.cors.UrlBasedCorsConfigurationSource;
+import org.springframework.web.servlet.config.annotation.InterceptorRegistry;
+import org.springframework.web.servlet.config.annotation.ResourceHandlerRegistry;
+import org.springframework.web.servlet.config.annotation.WebMvcConfigurer;
 
 import java.util.Arrays;
 import java.util.List;
@@ -37,8 +41,6 @@ public class SecurityConfig {
     @Value("${app.cors.allowed-origins:http://localhost:5173,http://localhost:3000,http://localhost:4200}")
     private String allowedOrigins;
 
-    // CORRECTION CLÉ : on ne déclare plus authenticationProvider() comme @Bean
-    // Spring Boot ne le voit plus → il ne court-circuite plus l'AuthenticationManager
     private DaoAuthenticationProvider buildAuthenticationProvider() {
         DaoAuthenticationProvider provider = new DaoAuthenticationProvider();
         provider.setUserDetailsService(userDetailsService);
@@ -85,6 +87,7 @@ public class SecurityConfig {
                         session.sessionCreationPolicy(SessionCreationPolicy.STATELESS))
                 .addFilterBefore(jwtAuthenticationFilter, UsernamePasswordAuthenticationFilter.class)
                 .authorizeHttpRequests(auth -> auth
+                        // Routes publiques
                         .requestMatchers(
                                 "/api/auth/login",
                                 "/swagger-ui/**",
@@ -94,35 +97,70 @@ public class SecurityConfig {
                                 "/actuator/info",
                                 "/error"
                         ).permitAll()
+
+                        // Routes spécifiques par rôle
                         .requestMatchers("/api/auth/register").hasRole("SUPER_ADMIN")
                         .requestMatchers("/api/auth/profile", "/api/auth/logout").authenticated()
+
+                        // SUPER_ADMIN uniquement
                         .requestMatchers(
                                 "/api/roles/**",
                                 "/api/permissions/**",
                                 "/api/actions/**"
                         ).hasRole("SUPER_ADMIN")
+
+                        // SUPER_ADMIN et ADMIN
                         .requestMatchers(
                                 "/api/employers/**",
                                 "/api/departements/**",
                                 "/api/postes/**"
                         ).hasAnyRole("SUPER_ADMIN", "ADMIN")
+
+                        // Routes documents - CORRECTION IMPORTANTE
+                        // Ne pas utiliser de double wildcard mal placé
                         .requestMatchers("/api/documents/download/**").authenticated()
-                        .requestMatchers("/api/documents/**")
-                        .hasAnyRole("SUPER_ADMIN", "ADMIN", "MANAGER", "STAFF")
+                        .requestMatchers("/api/documents/**").hasAnyRole("SUPER_ADMIN", "ADMIN", "MANAGER", "STAFF")
+
+                        // Autres routes
                         .requestMatchers(
                                 "/api/projets/**",
                                 "/api/taches/**",
                                 "/api/evenements/**",
                                 "/api/factures/**"
                         ).hasAnyRole("SUPER_ADMIN", "ADMIN", "MANAGER", "STAFF")
+
                         .requestMatchers("/api/commentaires/**")
                         .hasAnyRole("SUPER_ADMIN", "ADMIN", "MANAGER", "STAFF", "STAGIAIRE")
+
                         .requestMatchers("/api/dashboard/**").authenticated()
+
                         .anyRequest().authenticated()
                 );
-        // CORRECTION : on n'appelle plus .authenticationProvider() ici non plus
-        // car il n'y a plus de bean @Bean authenticationProvider()
 
         return http.build();
+    }
+
+    // Configuration Web MVC séparée - CORRIGÉE
+    @Configuration
+    public static class WebMvcConfig implements WebMvcConfigurer {
+
+        @Override
+        public void addResourceHandlers(ResourceHandlerRegistry registry) {
+            // Configuration correcte des ressources statiques
+            registry.addResourceHandler("/static/**")
+                    .addResourceLocations("classpath:/static/");
+
+            // Pour les ressources publiques (optionnel)
+            registry.addResourceHandler("/css/**")
+                    .addResourceLocations("classpath:/static/css/");
+            registry.addResourceHandler("/js/**")
+                    .addResourceLocations("classpath:/static/js/");
+        }
+
+        @Override
+        public void addInterceptors(InterceptorRegistry registry) {
+            // Ajoutez vos intercepteurs ici si nécessaire
+            // Ne pas ajouter d'intercepteur qui pourrait causer des conflits
+        }
     }
 }

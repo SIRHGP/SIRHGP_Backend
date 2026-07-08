@@ -2,8 +2,6 @@ package com.example.backend_sirhgp.mapper;
 
 import com.example.backend_sirhgp.dto.request.EvenementRequestDTO;
 import com.example.backend_sirhgp.dto.response.EvenementResponseDTO;
-import com.example.backend_sirhgp.dto.response.ProjetResponseDTO;
-import com.example.backend_sirhgp.dto.response.TacheResponseDTO;
 import com.example.backend_sirhgp.model.Departement;
 import com.example.backend_sirhgp.model.Employer;
 import com.example.backend_sirhgp.model.Evenement;
@@ -14,7 +12,7 @@ import org.springframework.stereotype.Component;
 
 @Generated(
     value = "org.mapstruct.ap.MappingProcessor",
-    date = "2026-05-05T09:21:41+0200",
+    date = "2026-05-18T17:22:43+0200",
     comments = "version: 1.5.5.Final, compiler: javac, environment: Java 17.0.18 (Microsoft)"
 )
 @Component
@@ -30,6 +28,8 @@ public class EvenementMapperImpl implements EvenementMapper {
 
         evenementResponseDTO.setCreateur( employerToEmployerSummaryDTO( evenement.getCreateur() ) );
         evenementResponseDTO.setProjet( projetToProjetSummaryDTO( evenement.getProjet() ) );
+        evenementResponseDTO.setCreateurId( evenementCreateurId( evenement ) );
+        evenementResponseDTO.setCreateurNom( evenementCreateurName( evenement ) );
         evenementResponseDTO.setId( evenement.getId() );
         evenementResponseDTO.setTitre( evenement.getTitre() );
         evenementResponseDTO.setDescription( evenement.getDescription() );
@@ -129,12 +129,12 @@ public class EvenementMapperImpl implements EvenementMapper {
         return name;
     }
 
-    protected ProjetResponseDTO.EmployerSummaryDTO employerToEmployerSummaryDTO(Employer employer) {
+    protected EvenementResponseDTO.EmployerSummaryDTO employerToEmployerSummaryDTO(Employer employer) {
         if ( employer == null ) {
             return null;
         }
 
-        ProjetResponseDTO.EmployerSummaryDTO employerSummaryDTO = new ProjetResponseDTO.EmployerSummaryDTO();
+        EvenementResponseDTO.EmployerSummaryDTO employerSummaryDTO = new EvenementResponseDTO.EmployerSummaryDTO();
 
         employerSummaryDTO.setId( employer.getId() );
         employerSummaryDTO.setName( employer.getName() );
@@ -145,17 +145,47 @@ public class EvenementMapperImpl implements EvenementMapper {
         return employerSummaryDTO;
     }
 
-    protected TacheResponseDTO.ProjetSummaryDTO projetToProjetSummaryDTO(Projet projet) {
+    protected EvenementResponseDTO.ProjetSummaryDTO projetToProjetSummaryDTO(Projet projet) {
         if ( projet == null ) {
             return null;
         }
 
-        TacheResponseDTO.ProjetSummaryDTO projetSummaryDTO = new TacheResponseDTO.ProjetSummaryDTO();
+        EvenementResponseDTO.ProjetSummaryDTO projetSummaryDTO = new EvenementResponseDTO.ProjetSummaryDTO();
 
         projetSummaryDTO.setId( projet.getId() );
         projetSummaryDTO.setNom( projet.getNom() );
         projetSummaryDTO.setCodeProjet( projet.getCodeProjet() );
 
         return projetSummaryDTO;
+    }
+
+    private Long evenementCreateurId(Evenement evenement) {
+        if ( evenement == null ) {
+            return null;
+        }
+        Employer createur = evenement.getCreateur();
+        if ( createur == null ) {
+            return null;
+        }
+        Long id = createur.getId();
+        if ( id == null ) {
+            return null;
+        }
+        return id;
+    }
+
+    private String evenementCreateurName(Evenement evenement) {
+        if ( evenement == null ) {
+            return null;
+        }
+        Employer createur = evenement.getCreateur();
+        if ( createur == null ) {
+            return null;
+        }
+        String name = createur.getName();
+        if ( name == null ) {
+            return null;
+        }
+        return name;
     }
 }
