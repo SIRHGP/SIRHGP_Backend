@@ -3,3 +3,6 @@
 .vscode/
 backend_sirhgp/uploads/
 
+
+*.bak
+
