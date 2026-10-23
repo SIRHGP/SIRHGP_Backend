@@ -38,4 +38,5 @@ public class EvenementRequestDTO {
     // createurId extrait du token JWT
     private Set<Long> participantsIds;
     private Long projetId;
+    private Long sucursalId;
 }

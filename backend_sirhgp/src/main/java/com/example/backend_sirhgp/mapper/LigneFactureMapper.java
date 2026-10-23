@@ -38,11 +38,13 @@ public interface LigneFactureMapper {
     @Mapping(target = "facture",      ignore = true)
     @Mapping(target = "tache",        ignore = true)
     @Mapping(target = "montantTotal", ignore = true)
+    @Mapping(target = "montantTVA", ignore = true)
     LigneFacture toEntity(LigneFactureRequestDTO dto);
 
     @Mapping(target = "id",           ignore = true)  // CORRECTION
     @Mapping(target = "facture",      ignore = true)
     @Mapping(target = "tache",        ignore = true)
     @Mapping(target = "montantTotal", ignore = true)
+    @Mapping(target = "montantTVA", ignore = true)
     void updateEntity(@MappingTarget LigneFacture entity, LigneFactureRequestDTO dto);
 }

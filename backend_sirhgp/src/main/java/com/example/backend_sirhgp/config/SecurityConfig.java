@@ -15,6 +15,7 @@ import org.springframework.security.config.annotation.web.builders.HttpSecurity;
 import org.springframework.security.config.annotation.web.configuration.EnableWebSecurity;
 import org.springframework.security.config.annotation.web.configurers.AbstractHttpConfigurer;
 import org.springframework.security.config.http.SessionCreationPolicy;
+import org.springframework.http.HttpMethod;
 import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.security.web.SecurityFilterChain;
 import org.springframework.security.web.authentication.UsernamePasswordAuthenticationFilter;
@@ -90,6 +91,7 @@ public class SecurityConfig {
                         // Routes publiques
                         .requestMatchers(
                                 "/api/auth/login",
+                                "/api/auth/register-entreprise",
                                 "/swagger-ui/**",
                                 "/v3/api-docs/**",
                                 "/webjars/**",
@@ -103,6 +105,8 @@ public class SecurityConfig {
                         .requestMatchers("/api/auth/profile", "/api/auth/logout").authenticated()
 
                         // SUPER_ADMIN uniquement
+                        .requestMatchers(HttpMethod.GET, "/api/roles/filtres")
+                        .hasAnyRole("SUPER_ADMIN", "ADMIN", "MANAGER", "LEAD")
                         .requestMatchers(
                                 "/api/roles/**",
                                 "/api/permissions/**",
@@ -110,23 +114,36 @@ public class SecurityConfig {
                         ).hasRole("SUPER_ADMIN")
 
                         // SUPER_ADMIN et ADMIN
-                        .requestMatchers(
-                                "/api/employers/**",
-                                "/api/departements/**",
-                                "/api/postes/**"
-                        ).hasAnyRole("SUPER_ADMIN", "ADMIN")
+                        .requestMatchers("/api/employers/**")
+                        .hasAnyRole("SUPER_ADMIN", "ADMIN", "MANAGER", "LEAD")
+                        .requestMatchers(HttpMethod.GET, "/api/departements/**", "/api/postes/**")
+                        .hasAnyRole("SUPER_ADMIN", "ADMIN", "MANAGER", "LEAD")
+                        .requestMatchers("/api/departements/**", "/api/postes/**")
+                        .hasAnyRole("SUPER_ADMIN", "ADMIN")
 
                         // Routes documents - CORRECTION IMPORTANTE
                         // Ne pas utiliser de double wildcard mal placé
                         .requestMatchers("/api/documents/download/**").authenticated()
-                        .requestMatchers("/api/documents/**").hasAnyRole("SUPER_ADMIN", "ADMIN", "MANAGER", "STAFF")
+                        .requestMatchers("/api/documents/**").hasAnyRole("SUPER_ADMIN", "ADMIN", "MANAGER", "STAFF", "SECRETAIRE")
+
+                        .requestMatchers("/api/secretariat/**").hasRole("SECRETAIRE")
+                        .requestMatchers("/api/factures/**", "/api/facturation-cycles/**").hasAnyRole("ADMIN", "MANAGER")
+                        .requestMatchers(HttpMethod.GET,
+                                "/api/projets/*/factures/**", "/api/projets/dashboard/**",
+                                "/api/projets/*/dashboard", "/api/projets/statistiques/**")
+                                .hasAnyRole("SUPER_ADMIN", "ADMIN", "MANAGER", "STAFF", "STAGIAIRE", "LEAD")
+                        .requestMatchers(HttpMethod.GET, "/api/projets/**")
+                                .hasAnyRole("SUPER_ADMIN", "ADMIN", "MANAGER", "STAFF", "STAGIAIRE", "LEAD", "SECRETAIRE")
+                        .requestMatchers("/api/projets/**")
+                                .hasAnyRole("SUPER_ADMIN", "ADMIN", "MANAGER", "STAFF")
+                        .requestMatchers("/api/taches/**", "/api/evenements/**")
+                                .hasAnyRole("SUPER_ADMIN", "ADMIN", "MANAGER", "STAFF", "STAGIAIRE", "LEAD", "SECRETAIRE")
 
                         // Autres routes
                         .requestMatchers(
                                 "/api/projets/**",
                                 "/api/taches/**",
-                                "/api/evenements/**",
-                                "/api/factures/**"
+                                "/api/evenements/**"
                         ).hasAnyRole("SUPER_ADMIN", "ADMIN", "MANAGER", "STAFF")
 
                         .requestMatchers("/api/commentaires/**")

@@ -49,6 +49,50 @@ public class DocumentService {
     @Value("${app.upload.dir:uploads}")
     private String uploadDir;
 
+    @Transactional
+    public DocumentResponseDTO uploadCyclePdf(String nom, String description, MultipartFile fichier) throws IOException {
+        return uploadStandalone(nom, description, Document.TypeDocument.FACTURE, fichier);
+    }
+
+    @Transactional
+    public DocumentResponseDTO uploadCvCandidat(String nom, MultipartFile fichier) throws IOException {
+        return uploadStandalone(nom, "CV de candidature", Document.TypeDocument.AUTRE, fichier);
+    }
+
+    @Transactional
+    public DocumentResponseDTO uploadMyCv(String nom, MultipartFile fichier) throws IOException {
+        return uploadStandalone(nom, "CV personnel", Document.TypeDocument.CV, fichier);
+    }
+
+    private DocumentResponseDTO uploadStandalone(String nom, String description, Document.TypeDocument type,
+                                                 MultipartFile fichier) throws IOException {
+        validateFile(fichier);
+        Path path = savePhysicalFile(fichier);
+        Employer expediteur = getCurrentUser();
+        Document document = Document.builder()
+                .nom(nom)
+                .description(description)
+                .nomFichier(path.getFileName().toString())
+                .typeMime(fichier.getContentType() != null ? fichier.getContentType() : "application/octet-stream")
+                .cheminStockage(path.toString())
+                .taille(fichier.getSize())
+                .type(type)
+                .status(DocumentStatus.ACTIF)
+                .publique(false)
+                .expediteur(expediteur)
+                .employer(expediteur)
+                .build();
+        return documentMapper.toResponseDTO(documentRepository.save(document));
+    }
+
+    @Transactional
+    public void rattacherCvAuNouvelEmploye(Long documentId, Employer nouvelEmploye) {
+        Document document = documentRepository.findById(documentId)
+                .orElseThrow(() -> new ResourceNotFoundException("CV non trouvé : " + documentId));
+        document.setEmployer(nouvelEmploye);
+        documentRepository.save(document);
+    }
+
     // ─── Upload + dispatch OBLIGATOIRE ────────────────────────────────────────
     // Crée UN SEUL document avec expediteur + destinataire. Pas de clonage.
     // Le super admin ne peut pas être destinataire mais peut envoyer.
@@ -69,6 +113,7 @@ public class DocumentService {
         if (isSuperAdmin(destinataire)) {
             throw new IllegalArgumentException("Impossible d'envoyer un document au Super Administrateur");
         }
+        verifierPerimetreSecretaire(expediteur, destinataire);
 
         Path filePath = savePhysicalFile(fichier);
 
@@ -87,6 +132,24 @@ public class DocumentService {
                 .nombreTelechargements(0L)
                 .status(DocumentStatus.ACTIF)
                 .build();
+
+        if (dto.getEmployerId() != null) {
+            Employer lie = employerRepository.findById(dto.getEmployerId())
+                    .orElseThrow(() -> new ResourceNotFoundException("Employé non trouvé : " + dto.getEmployerId()));
+            verifierPerimetreSecretaire(expediteur, lie);
+            document.setEmployer(lie);
+        }
+        if (dto.getProjetId() != null) {
+            var projet = projetRepository.findById(dto.getProjetId())
+                    .orElseThrow(() -> new ResourceNotFoundException("Projet non trouvé : " + dto.getProjetId()));
+            if (isSecretary(expediteur) && (projet.getEntreprise() == null || projet.getSucursal() == null
+                    || expediteur.getEntreprise() == null || expediteur.getSucursal() == null
+                    || !expediteur.getEntreprise().getId().equals(projet.getEntreprise().getId())
+                    || !expediteur.getSucursal().getId().equals(projet.getSucursal().getId()))) {
+                throw new org.springframework.security.access.AccessDeniedException("Projet hors de votre succursale.");
+            }
+            document.setProjet(projet);
+        }
 
         Document saved = documentRepository.save(document);
 
@@ -109,9 +172,16 @@ public class DocumentService {
         Document document = documentRepository.findByIdWithRelations(documentId)
                 .orElseThrow(() -> new ResourceNotFoundException("Document non trouvé: " + documentId));
 
+        if (isSecretary(expediteur) && (document.getExpediteur() == null
+                || !expediteur.getId().equals(document.getExpediteur().getId()))) {
+            throw new org.springframework.security.access.AccessDeniedException(
+                    "Vous pouvez transférer uniquement les documents que vous avez envoyés.");
+        }
+
         if (!document.appartientA(expediteur.getId()) && !isAdminOrManager(expediteur)) {
             throw new UnauthorizedException("Vous n'êtes pas autorisé à dispatcher ce document");
         }
+        verifierPerimetreSecretaire(expediteur, document.getExpediteur());
 
         Employer nouveauDestinataire = employerRepository.findById(dto.getDestinataireId())
                 .orElseThrow(() -> new ResourceNotFoundException("Destinataire non trouvé: " + dto.getDestinataireId()));
@@ -119,6 +189,7 @@ public class DocumentService {
         if (isSuperAdmin(nouveauDestinataire)) {
             throw new IllegalArgumentException("Impossible de transférer un document au Super Administrateur");
         }
+        verifierPerimetreSecretaire(expediteur, nouveauDestinataire);
 
         // Mise à jour en place — zéro doublon
         document.setExpediteur(expediteur);
@@ -142,14 +213,17 @@ public class DocumentService {
     // ─── Métadonnées ─────────────────────────────────────────────────────────
     @Transactional(readOnly = true)
     public DocumentResponseDTO getDocumentMetadata(Long id) {
-        return documentMapper.toResponseDTO(
-                documentRepository.findByIdWithRelations(id)
-                        .orElseThrow(() -> new ResourceNotFoundException("Document non trouvé: " + id)));
+        Employer current = getCurrentUser();
+        Document doc = documentRepository.findByIdWithRelations(id)
+                .orElseThrow(() -> new ResourceNotFoundException("Document non trouvé: " + id));
+        if (isSecretary(current) && !doc.appartientA(current.getId())) throw new ResourceNotFoundException("Document non trouvé: " + id);
+        return documentMapper.toResponseDTO(doc);
     }
 
     // ─── Documents reçus ─────────────────────────────────────────────────────
     @Transactional(readOnly = true)
     public List<DocumentResponseDTO> getReceivedDocuments(Long employerId) {
+        verifierEmployeAccessible(getCurrentUser(), employerId);
         return documentRepository.findReceivedDocuments(employerId, DocumentStatus.ACTIF)
                 .stream().map(documentMapper::toResponseDTO).collect(Collectors.toList());
     }
@@ -157,6 +231,7 @@ public class DocumentService {
     // ─── Documents non lus ───────────────────────────────────────────────────
     @Transactional(readOnly = true)
     public List<DocumentResponseDTO> getUnreadDocuments(Long employerId) {
+        verifierEmployeAccessible(getCurrentUser(), employerId);
         return documentRepository.findUnreadReceivedDocuments(employerId, DocumentStatus.ACTIF)
                 .stream().map(documentMapper::toResponseDTO).collect(Collectors.toList());
     }
@@ -164,6 +239,7 @@ public class DocumentService {
     // ─── Documents envoyés ───────────────────────────────────────────────────
     @Transactional(readOnly = true)
     public List<DocumentResponseDTO> getSentDocuments(Long employerId) {
+        verifierEmployeAccessible(getCurrentUser(), employerId);
         return documentRepository.findSentDocuments(employerId, DocumentStatus.ACTIF)
                 .stream().map(documentMapper::toResponseDTO).collect(Collectors.toList());
     }
@@ -209,6 +285,12 @@ public class DocumentService {
         Employer currentUser = getCurrentUser();
         Document document = documentRepository.findById(documentId)
                 .orElseThrow(() -> new ResourceNotFoundException("Document non trouvé: " + documentId));
+
+        if (isSecretary(currentUser) && (document.getExpediteur() == null
+                || !currentUser.getId().equals(document.getExpediteur().getId()))) {
+            throw new org.springframework.security.access.AccessDeniedException(
+                    "Vous pouvez archiver uniquement les documents que vous avez envoyés.");
+        }
 
         if (!document.appartientA(currentUser.getId()) && !isAdminOrManager(currentUser)) {
             throw new UnauthorizedException("Vous n'êtes pas autorisé à archiver ce document");
@@ -257,6 +339,8 @@ public class DocumentService {
         if (!canEdit) {
             throw new UnauthorizedException("Vous n'êtes pas autorisé à modifier ce document");
         }
+        if (isSecretary(currentUser) && !document.getExpediteur().getId().equals(currentUser.getId()))
+            throw new UnauthorizedException("Vous ne pouvez modifier que les documents que vous avez envoyés.");
 
         document.setNom(dto.getNom());
         document.setDescription(dto.getDescription());
@@ -273,6 +357,8 @@ public class DocumentService {
         Employer currentUser = getCurrentUser();
         Document document = documentRepository.findByIdWithRelations(id)
                 .orElseThrow(() -> new ResourceNotFoundException("Document non trouvé: " + id));
+
+        if (isSecretary(currentUser)) throw new org.springframework.security.access.AccessDeniedException("La suppression des documents est interdite au rôle SECRETAIRE.");
 
         boolean canDelete = document.getExpediteur().getId().equals(currentUser.getId())
                 || document.appartientA(currentUser.getId())
@@ -310,6 +396,7 @@ public class DocumentService {
     // ─── Compteur non lus ────────────────────────────────────────────────────
     @Transactional(readOnly = true)
     public long getUnreadCount(Long employerId) {
+        verifierEmployeAccessible(getCurrentUser(), employerId);
         return documentRepository.countByDestinataireIdAndEstLuFalseAndStatus(employerId, DocumentStatus.ACTIF);
     }
 
@@ -349,5 +436,26 @@ public class DocumentService {
         if (employer.getRole() == null) return false;
         String role = employer.getRole().getName();
         return "ADMIN".equalsIgnoreCase(role) || "MANAGER".equalsIgnoreCase(role);
+    }
+
+    private boolean isSecretary(Employer employer) {
+        return employer != null && employer.getRole() != null && "SECRETAIRE".equals(employer.getRole().getName());
+    }
+
+    private void verifierPerimetreSecretaire(Employer secretary, Employer employee) {
+        if (!isSecretary(secretary)) return;
+        if (secretary.getEntreprise() == null || secretary.getSucursal() == null
+                || employee == null || employee.getEntreprise() == null || employee.getSucursal() == null
+                || !secretary.getEntreprise().getId().equals(employee.getEntreprise().getId())
+                || !secretary.getSucursal().getId().equals(employee.getSucursal().getId())) {
+            throw new org.springframework.security.access.AccessDeniedException("La personne doit appartenir à votre succursale.");
+        }
+    }
+
+    private void verifierEmployeAccessible(Employer current, Long employeeId) {
+        if (!isSecretary(current)) return;
+        Employer employee = employerRepository.findById(employeeId)
+                .orElseThrow(() -> new ResourceNotFoundException("Employé non trouvé : " + employeeId));
+        verifierPerimetreSecretaire(current, employee);
     }
 }

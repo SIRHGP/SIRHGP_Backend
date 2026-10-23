@@ -15,6 +15,8 @@ public interface PosteRepository extends JpaRepository<Poste, Long> {
     boolean existsByName(String name);
     Optional<Poste> findByName(String name);
     long countByName(String name);   // utile pour certains contrôles
+    long countByDepartementIdIsNotNull();
+    long countByDepartementIdIsNull();
 
     @Query("SELECT p FROM Poste p LEFT JOIN FETCH p.permissions WHERE p.id = :id")
     Optional<Poste> findByIdWithPermissions(@Param("id") Long id);

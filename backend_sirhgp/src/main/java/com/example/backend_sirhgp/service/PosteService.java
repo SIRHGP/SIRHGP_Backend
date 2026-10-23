@@ -23,6 +23,7 @@ import java.util.HashSet;
 import java.util.List;
 import java.util.Set;
 import java.util.stream.Collectors;
+import java.util.Set;
 
 /**
  * CORRECTIONS :
@@ -44,6 +45,19 @@ public class PosteService {
     private final DepartementRepository departementRepository;
     private final PermissionRepository permissionRepository;
     private final PosteMapper posteMapper;
+    private final EntrepriseContextService entrepriseContextService;
+
+    @Transactional(readOnly = true)
+    public java.util.Map<String, Long> getStats() {
+        List<Poste> scoped = findScopedPostes();
+        long total = scoped.size();
+        long rattaches = scoped.stream().filter(p -> p.getDepartement() != null).count();
+        return java.util.Map.of(
+                "total", total,
+                "rattaches", rattaches,
+                "sansDepartement", total - rattaches
+        );
+    }
 
     @Transactional
     public PosteResponseDTO create(PosteRequestDTO dto) {
@@ -67,22 +81,80 @@ public class PosteService {
     // CORRECTION : pagination
     @Transactional(readOnly = true)
     public Page<PosteResponseDTO> findAll(Pageable pageable) {
-        return posteRepository.findAll(pageable)
-                .map(p -> enrich(posteMapper.toResponseDTO(p), p.getId()));
+        String role = entrepriseContextService.currentRole();
+        if ("SUPER_ADMIN".equals(role)) {
+            return posteRepository.findAll(pageable).map(p -> enrich(posteMapper.toResponseDTO(p), p.getId()));
+        }
+        List<PosteResponseDTO> items = findScopedPostes().stream()
+                .map(p -> enrich(posteMapper.toResponseDTO(p), p.getId())).toList();
+        if (pageable.isUnpaged()) return new org.springframework.data.domain.PageImpl<>(items);
+        int from = Math.min((int) pageable.getOffset(), items.size());
+        int to = Math.min(from + pageable.getPageSize(), items.size());
+        return new org.springframework.data.domain.PageImpl<>(items.subList(from, to), pageable, items.size());
     }
 
     @Transactional(readOnly = true)
     public PosteResponseDTO findById(Long id) {
         Poste poste = posteRepository.findByIdWithDetails(id)
                 .orElseThrow(() -> new ResourceNotFoundException("Poste non trouvé : " + id));
+        verifierLecture(poste);
         return enrich(posteMapper.toResponseDTO(poste), id);
     }
 
     @Transactional(readOnly = true)
     public List<PosteResponseDTO> findByDepartement(Long departementId) {
+        verifierDepartement(departementId);
         return posteRepository.findByDepartementId(departementId).stream()
                 .map(p -> enrich(posteMapper.toResponseDTO(p), p.getId()))
                 .collect(Collectors.toList());
+    }
+
+    private List<Poste> findScopedPostes() {
+        if ("SUPER_ADMIN".equals(entrepriseContextService.currentRole())) return posteRepository.findAll();
+        Set<Long> departmentIds = allowedDepartmentIds();
+        return posteRepository.findAll().stream()
+                .filter(p -> p.getDepartement() != null && departmentIds.contains(p.getDepartement().getId()))
+                .toList();
+    }
+
+    private Set<Long> allowedDepartmentIds() {
+        String role = entrepriseContextService.currentRole();
+        if ("SUPER_ADMIN".equals(role)) return Set.of();
+        Long entrepriseId = entrepriseContextService.getScopeEntrepriseId();
+        if (entrepriseId == null) return Set.of();
+        Long sucursalId = entrepriseContextService.getScopeSucursalId();
+        if ("MANAGER".equals(role) && sucursalId == null) return Set.of();
+        List<Long> ids;
+        if ("LEAD".equals(role)) {
+            List<Long> leadIds = entrepriseContextService.getScopeDepartementIds();
+            if (leadIds.isEmpty()) ids = sucursalId == null ? departementRepository.findIdsByEntrepriseId(entrepriseId)
+                    : departementRepository.findIdsBySucursalId(sucursalId, entrepriseId);
+            else if (sucursalId == null) {
+                Set<Long> companyIds = Set.copyOf(departementRepository.findIdsByEntrepriseId(entrepriseId));
+                ids = leadIds.stream().filter(companyIds::contains).toList();
+            }
+            else {
+                Set<Long> branchIds = Set.copyOf(departementRepository.findIdsBySucursalId(sucursalId, entrepriseId));
+                ids = leadIds.stream().filter(branchIds::contains).toList();
+            }
+        } else {
+            ids = sucursalId == null ? departementRepository.findIdsByEntrepriseId(entrepriseId)
+                    : departementRepository.findIdsBySucursalId(sucursalId, entrepriseId);
+        }
+        return Set.copyOf(ids);
+    }
+
+    private void verifierLecture(Poste poste) {
+        String role = entrepriseContextService.currentRole();
+        if ("SUPER_ADMIN".equals(role)) return;
+        if (poste.getDepartement() == null || !allowedDepartmentIds().contains(poste.getDepartement().getId()))
+            throw new ResourceNotFoundException("Poste non trouvé : " + poste.getId());
+    }
+
+    private void verifierDepartement(Long departementId) {
+        if (!"SUPER_ADMIN".equals(entrepriseContextService.currentRole())
+                && !allowedDepartmentIds().contains(departementId))
+            throw new ResourceNotFoundException("Département non trouvé : " + departementId);
     }
 
     @Transactional

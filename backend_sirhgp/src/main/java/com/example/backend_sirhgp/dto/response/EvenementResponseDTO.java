@@ -25,6 +25,9 @@ public class EvenementResponseDTO {
     private boolean jourEntier;
     private LocalDateTime dateCreation;
     private LocalDateTime dateModification;
+    private Long entrepriseId;
+    private Long sucursalId;
+    private String sucursalNom;
 
     // ⭐ CHAMPS AJOUTÉS POUR LE FRONTEND ⭐
     private Long createurId;        // ID du créateur (pour comparaison)

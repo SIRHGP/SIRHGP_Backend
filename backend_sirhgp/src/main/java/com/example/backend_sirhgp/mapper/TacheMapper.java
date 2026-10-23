@@ -24,6 +24,8 @@ public interface TacheMapper {
     @Mapping(source = "projet.id",                       target = "projet.id")
     @Mapping(source = "projet.nom",                      target = "projet.nom")
     @Mapping(source = "projet.codeProjet",               target = "projet.codeProjet")
+    @Mapping(source = "projet.id", target = "projetId")
+    @Mapping(source = "sucursal.id", target = "sucursalId")
     @Mapping(target = "nombreCommentaires",    ignore = true)
     @Mapping(target = "commentairesRecents",   ignore = true)
     @Mapping(target = "estEnRetard",           ignore = true)
@@ -41,6 +43,9 @@ public interface TacheMapper {
     @Mapping(target = "dateFin",          ignore = true)
     @Mapping(target = "dateCreation",     ignore = true)
     @Mapping(target = "dateModification", ignore = true)
+    @Mapping(target = "entreprise",       ignore = true)
+    @Mapping(target = "sucursal",         ignore = true)
+    @Mapping(target = "visibilite", expression = "java(Tache.Visibilite.SUCURSALE)")
     Tache toEntity(TacheRequestDTO dto);
 
     @Mapping(target = "id",               ignore = true)
@@ -53,5 +58,8 @@ public interface TacheMapper {
     @Mapping(target = "dateFin",          ignore = true)
     @Mapping(target = "dateCreation",     ignore = true)
     @Mapping(target = "dateModification", ignore = true)
+    @Mapping(target = "entreprise",       ignore = true)
+    @Mapping(target = "sucursal",         ignore = true)
+    @Mapping(target = "visibilite",       ignore = true)
     void updateEntity(@MappingTarget Tache entity, TacheRequestDTO dto);
 }

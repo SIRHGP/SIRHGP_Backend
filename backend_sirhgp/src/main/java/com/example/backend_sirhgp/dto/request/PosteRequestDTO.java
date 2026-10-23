@@ -13,7 +13,6 @@ public class PosteRequestDTO {
     private String name;
     private String description;
 
-    @NotNull(message = "Le rôle est obligatoire")
     private Long roleId;
 
     @NotNull(message = "Le département est obligatoire")

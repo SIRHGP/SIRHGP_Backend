@@ -10,6 +10,7 @@ import org.springframework.security.core.userdetails.UserDetails;
 
 import java.time.LocalDate;
 import java.time.LocalDateTime;
+import java.math.BigDecimal;
 import java.util.ArrayList;
 import java.util.Collection;
 import java.util.List;
@@ -47,7 +48,7 @@ import java.util.List;
 @AllArgsConstructor
 @Builder
 @EqualsAndHashCode(onlyExplicitlyIncluded = true)
-@ToString(exclude = {"motDePasse", "poste", "role"})
+@ToString(exclude = {"motDePasse", "poste", "role", "entreprise", "sucursal", "manager"})
 // motDePasse exclu du toString pour éviter toute fuite dans les logs
 public class Employer implements UserDetails {
 
@@ -75,6 +76,16 @@ public class Employer implements UserDetails {
     private String numeroTelephone;
     private LocalDate dateEmbauche;
 
+    @Column(precision = 15, scale = 2)
+    private BigDecimal salaireBase;
+
+    private String nui;
+    private String rib;
+    private String cvUrl;
+
+    @Builder.Default
+    private boolean motDePasseTemporaire = false;
+
     @Builder.Default
     private boolean actif = true;
 
@@ -93,6 +104,18 @@ public class Employer implements UserDetails {
     @ManyToOne(fetch = FetchType.LAZY)
     @JoinColumn(name = "role_id")
     private Role role;
+
+    @ManyToOne(fetch = FetchType.LAZY)
+    @JoinColumn(name = "entreprise_id")
+    private Entreprise entreprise;
+
+    @ManyToOne(fetch = FetchType.LAZY)
+    @JoinColumn(name = "sucursal_id")
+    private Sucursal sucursal;
+
+    @ManyToOne(fetch = FetchType.LAZY)
+    @JoinColumn(name = "manager_id")
+    private Employer manager;
 
     // ─── UserDetails ─────────────────────────────────────────────────────────
 

@@ -77,6 +77,19 @@ public class Tache {
     @JoinColumn(name = "projet_id", nullable = false)
     private Projet projet;
 
+    @ManyToOne(fetch = FetchType.LAZY)
+    @JoinColumn(name = "entreprise_id")
+    private Entreprise entreprise;
+
+    @ManyToOne(fetch = FetchType.LAZY)
+    @JoinColumn(name = "sucursal_id")
+    private Sucursal sucursal;
+
+    @Enumerated(EnumType.STRING)
+    @Column(nullable = false)
+    @Builder.Default
+    private Visibilite visibilite = Visibilite.SUCURSALE;
+
     @OneToMany(mappedBy = "tache", cascade = CascadeType.ALL, orphanRemoval = true)
     @Builder.Default
     private Set<CommentaireTache> commentaires = new HashSet<>();
@@ -97,6 +110,8 @@ public class Tache {
         HAUTE,
         URGENTE
     }
+
+    public enum Visibilite { PRIVEE, SUCURSALE, ENTREPRISE, @Deprecated PUBLIQUE }
 
     // ─── Méthodes utilitaires ─────────────────────────────────────────────────
 

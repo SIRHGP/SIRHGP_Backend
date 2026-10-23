@@ -5,11 +5,18 @@ import org.springframework.data.jpa.repository.JpaRepository;
 import org.springframework.data.jpa.repository.Query;
 import org.springframework.data.repository.query.Param;
 import org.springframework.stereotype.Repository;
+import org.springframework.data.jpa.repository.Lock;
+import jakarta.persistence.LockModeType;
+import java.util.Optional;
 
 import java.util.List;
 
 @Repository
 public interface SucursalRepository extends JpaRepository<Sucursal, Long> {
+
+    @Lock(LockModeType.PESSIMISTIC_WRITE)
+    @Query("SELECT s FROM Sucursal s WHERE s.id = :id")
+    Optional<Sucursal> findByIdForUpdate(@Param("id") Long id);
 
     List<Sucursal> findByEntrepriseIdOrderByNameAsc(Long entrepriseId);
 

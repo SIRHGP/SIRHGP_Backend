@@ -29,7 +29,7 @@ public class PaieController {
 
     /** 5.1 — Résumé des heures pointées d'un employé pour un mois (fiche employé → paie). */
     @GetMapping("/employes/{id}/heures/{mois}/{annee}")
-    @PreAuthorize("hasAnyRole('ADMIN', 'MANAGER', 'LEAD', 'STAFF', 'STAGIAIRE')")
+    @PreAuthorize("hasAnyRole('ADMIN', 'MANAGER', 'LEAD', 'STAFF', 'STAGIAIRE', 'SECRETAIRE')")
     public ResponseEntity<ApiResponse<PaieHeuresDTO>> heuresEmploye(
             @PathVariable Long id, @PathVariable Integer mois, @PathVariable Integer annee) {
         return ResponseEntity.ok(new ApiResponse<>(true, "Heures du mois récupérées",
@@ -82,7 +82,7 @@ public class PaieController {
 
     /** Consultation des bulletins (scopée par entreprise / succursale ; STAFF/STAGIAIRE = ses propres bulletins). */
     @GetMapping("/bulletins")
-    @PreAuthorize("hasAnyRole('ADMIN', 'MANAGER', 'LEAD', 'STAFF', 'STAGIAIRE')")
+    @PreAuthorize("hasAnyRole('ADMIN', 'MANAGER', 'LEAD', 'STAFF', 'STAGIAIRE', 'SECRETAIRE')")
     public ResponseEntity<ApiResponse<Page<BulletinPaieResponseDTO>>> consulter(
             Pageable pageable,
             @RequestParam(required = false) Long employeId,
@@ -94,7 +94,7 @@ public class PaieController {
 
     /** Export PDF d'un bulletin (accès borné par PaieService : self pour STAFF/STAGIAIRE). */
     @GetMapping("/bulletins/{id}/pdf")
-    @PreAuthorize("hasAnyRole('ADMIN', 'MANAGER', 'LEAD', 'STAFF', 'STAGIAIRE')")
+    @PreAuthorize("hasAnyRole('ADMIN', 'MANAGER', 'LEAD', 'STAFF', 'STAGIAIRE', 'SECRETAIRE')")
     public ResponseEntity<byte[]> pdf(@PathVariable Long id) {
         BulletinPaie b = paieService.getEntityForPdf(id);
         byte[] content;

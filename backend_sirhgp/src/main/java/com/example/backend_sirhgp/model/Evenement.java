@@ -74,6 +74,14 @@ public class Evenement {
     @JoinColumn(name = "createur_id")
     private Employer createur;
 
+    @ManyToOne(fetch = FetchType.LAZY)
+    @JoinColumn(name = "entreprise_id")
+    private Entreprise entreprise;
+
+    @ManyToOne(fetch = FetchType.LAZY)
+    @JoinColumn(name = "sucursal_id")
+    private Sucursal sucursal;
+
     @ManyToMany
     @JoinTable(
             name = "evenement_participants",

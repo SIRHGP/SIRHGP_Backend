@@ -25,9 +25,14 @@ import java.util.Optional;
 @Repository
 public interface ProjetRepository extends JpaRepository<Projet, Long> {
 
+    @Query("SELECT p.entreprise.id, COUNT(p) FROM Projet p WHERE p.entreprise IS NOT NULL GROUP BY p.entreprise.id")
+    List<Object[]> countGroupedByEntreprise();
+
     // ─── Filtres simples ──────────────────────────────────────
 
     List<Projet> findByChefProjetId(Long chefProjetId);
+    List<Projet> findByEntrepriseId(Long entrepriseId);
+    List<Projet> findBySucursalId(Long sucursalId);
     List<Projet> findByStatut(Projet.StatutProjet statut);
     Optional<Projet> findByCodeProjet(String codeProjet);
     boolean existsByCodeProjet(String codeProjet);

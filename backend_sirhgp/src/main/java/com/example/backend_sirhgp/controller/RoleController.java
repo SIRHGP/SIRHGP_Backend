@@ -3,6 +3,7 @@ package com.example.backend_sirhgp.controller;
 
 import com.example.backend_sirhgp.dto.request.RoleRequestDTO;
 import com.example.backend_sirhgp.dto.response.RoleResponseDTO;
+import com.example.backend_sirhgp.dto.response.RoleFilterDTO;
 import com.example.backend_sirhgp.response.ApiResponse;
 import com.example.backend_sirhgp.service.RoleService;
 import jakarta.validation.Valid;
@@ -15,6 +16,7 @@ import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.web.bind.annotation.*;
 
 import java.util.Set;
+import java.util.List;
 
 @RestController
 @RequestMapping("/api/roles")
@@ -23,6 +25,12 @@ import java.util.Set;
 public class RoleController {
 
     private final RoleService roleService;
+
+    @GetMapping("/filtres")
+    @PreAuthorize("hasAnyRole('SUPER_ADMIN', 'ADMIN', 'MANAGER', 'LEAD')")
+    public ResponseEntity<ApiResponse<List<RoleFilterDTO>>> filtres() {
+        return ResponseEntity.ok(new ApiResponse<>(true, "Rôles disponibles", roleService.findForFilters()));
+    }
 
     @PostMapping
     public ResponseEntity<ApiResponse<RoleResponseDTO>> create(

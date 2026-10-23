@@ -8,15 +8,21 @@ import com.example.backend_sirhgp.mapper.TacheMapper;
 import com.example.backend_sirhgp.model.Employer;
 import com.example.backend_sirhgp.model.Projet;
 import com.example.backend_sirhgp.model.Tache;
+import com.example.backend_sirhgp.model.Sucursal;
+import com.example.backend_sirhgp.model.Entreprise;
 import com.example.backend_sirhgp.repository.CommentaireTacheRepository;
 import com.example.backend_sirhgp.repository.EmployerRepository;
 import com.example.backend_sirhgp.repository.ProjetRepository;
 import com.example.backend_sirhgp.repository.TacheRepository;
+import com.example.backend_sirhgp.repository.DemandePermissionRepository;
+import com.example.backend_sirhgp.repository.SucursalRepository;
+import com.example.backend_sirhgp.service.EntrepriseContextService;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
+import org.springframework.data.domain.PageImpl;
 import org.springframework.security.core.Authentication;
 import org.springframework.security.core.context.SecurityContextHolder;
 import org.springframework.stereotype.Service;
@@ -26,6 +32,7 @@ import java.time.LocalDate;
 import java.time.LocalDateTime;
 import java.time.temporal.ChronoUnit;
 import java.util.List;
+import java.util.Map;
 import java.util.stream.Collectors;
 
 /**
@@ -47,6 +54,24 @@ public class TacheService {
     private final TacheMapper tacheMapper;
     private final CommentaireService commentaireService;
     private final ApplicationEventPublisher eventPublisher; // AJOUT pour la publication d'événements
+    private final DemandePermissionRepository demandePermissionRepository;
+    private final SucursalRepository sucursalRepository;
+    private final EntrepriseContextService entrepriseContextService;
+
+    @Transactional(readOnly = true)
+    public Map<String, Object> getMonEtat() {
+        Employer current = getCurrentUser();
+        boolean roleGestion = current.getRole() != null && List.of("SUPER_ADMIN", "ADMIN", "MANAGER", "LEAD")
+                .contains(current.getRole().getName());
+        boolean enConge = !demandePermissionRepository.findAbsencesApprouvees(
+                current.getId(), LocalDate.now(), LocalDate.now()).isEmpty();
+        return Map.of(
+                "peutReagir", !roleGestion && !enConge,
+                "roleGestion", roleGestion,
+                "enConge", enConge,
+                "raison", enConge ? "Une absence approuvée est en cours aujourd'hui." : ""
+        );
+    }
 
     @Transactional
     public TacheResponseDTO create(TacheRequestDTO dto) {
@@ -63,8 +88,10 @@ public class TacheService {
             tache.setAssignee(assignee);
         }
 
+        if (dto.getProjetId() == null) throw new IllegalArgumentException("Le projet est obligatoire pour créer une tâche.");
         Projet projet = projetRepository.findById(dto.getProjetId())
                 .orElseThrow(() -> new ResourceNotFoundException("Projet non trouvé : " + dto.getProjetId()));
+        configurerPerimetreTache(tache, createur, projet, dto.getSucursalId(), assignee);
         tache.setProjet(projet);
 
         if (tache.getStatut() == Tache.StatutTache.EN_COURS && tache.getDateDebut() == null) {
@@ -85,8 +112,24 @@ public class TacheService {
     // CORRECTION : pagination
     @Transactional(readOnly = true)
     public Page<TacheResponseDTO> findAll(Pageable pageable) {
-        return tacheRepository.findAll(pageable)
-                .map(t -> enrich(tacheMapper.toResponseDTO(t), t));
+        Employer current = getCurrentUser();
+        if (isSecretary(current)) {
+            List<TacheResponseDTO> items = tacheRepository.findAll().stream()
+                    .filter(t -> dansSuccursale(current, t)
+                            && ((t.getCreateur() != null && current.getId().equals(t.getCreateur().getId()))
+                            || (t.getAssignee() != null && current.getId().equals(t.getAssignee().getId()))))
+                    .map(t -> enrich(tacheMapper.toResponseDTO(t), t)).toList();
+            return page(items, pageable);
+        }
+        if (isSuperAdmin(current)) {
+            return tacheRepository.findAll(pageable).map(t -> enrich(tacheMapper.toResponseDTO(t), t));
+        }
+        if (current.getEntreprise() == null) return Page.empty(pageable);
+        Page<Tache> scoped = current.getSucursal() == null || isAdmin(current)
+                ? tacheRepository.findByEntrepriseId(current.getEntreprise().getId(), pageable)
+                : tacheRepository.findByEntrepriseIdAndSucursalId(
+                        current.getEntreprise().getId(), current.getSucursal().getId(), pageable);
+        return scoped.map(t -> enrich(tacheMapper.toResponseDTO(t), t));
     }
 
     @Transactional(readOnly = true)
@@ -94,20 +137,32 @@ public class TacheService {
         // CORRECTION : findByIdWithRelations pour éviter N+1
         Tache tache = tacheRepository.findByIdWithRelations(id)
                 .orElseThrow(() -> new ResourceNotFoundException("Tâche non trouvée : " + id));
+        verifierTacheAccessible(tache, getCurrentUser());
         return enrich(tacheMapper.toResponseDTO(tache), tache);
     }
 
     @Transactional(readOnly = true)
     public List<TacheResponseDTO> findByAssigneeId(Long assigneeId) {
-        return tacheRepository.findByProjetIdWithAssignee(assigneeId).stream()
+        Employer current = getCurrentUser();
+        if (isSecretary(current) && !current.getId().equals(assigneeId)) throw new org.springframework.security.access.AccessDeniedException("Vous ne pouvez consulter que les tâches qui vous sont assignées.");
+        Employer assignee = employerRepository.findById(assigneeId)
+                .orElseThrow(() -> new ResourceNotFoundException("Employé non trouvé : " + assigneeId));
+        verifierEmployeAccessible(current, assignee);
+        return tacheRepository.findByAssigneeIdWithRelations(assigneeId).stream()
+                .filter(t -> estTacheDansScope(current, t))
                 .map(t -> enrich(tacheMapper.toResponseDTO(t), t))
                 .collect(Collectors.toList());
     }
 
     @Transactional(readOnly = true)
     public List<TacheResponseDTO> findByProjetId(Long projetId) {
+        Employer current = getCurrentUser();
+        Projet projet = projetRepository.findById(projetId)
+                .orElseThrow(() -> new ResourceNotFoundException("Projet non trouvé : " + projetId));
+        verifierProjetAccessible(current, projet);
         // CORRECTION : query avec JOIN FETCH sur assignee
         return tacheRepository.findByProjetIdWithAssignee(projetId).stream()
+                .filter(t -> estTacheDansScope(current, t))
                 .map(t -> enrich(tacheMapper.toResponseDTO(t), t))
                 .collect(Collectors.toList());
     }
@@ -116,6 +171,9 @@ public class TacheService {
     public TacheResponseDTO update(Long id, TacheRequestDTO dto) {
         Tache tache = tacheRepository.findByIdWithRelations(id)
                 .orElseThrow(() -> new ResourceNotFoundException("Tâche non trouvée : " + id));
+        Employer current = getCurrentUser();
+        verifierTacheAccessible(tache, current);
+        verifierModificationSecretaire(tache, current);
 
         Employer oldAssignee = tache.getAssignee(); // Sauvegarde ancien assignee
 
@@ -129,6 +187,12 @@ public class TacheService {
         } else {
             tache.setAssignee(null);
         }
+
+        if (dto.getProjetId() == null) throw new IllegalArgumentException("Le projet est obligatoire pour une tâche.");
+        Projet projet = projetRepository.findById(dto.getProjetId())
+                .orElseThrow(() -> new ResourceNotFoundException("Projet non trouvé : " + dto.getProjetId()));
+        configurerPerimetreTache(tache, current, projet, dto.getSucursalId(), newAssignee);
+        tache.setProjet(projet);
 
         updateDatesStatut(tache);
         Tache updated = tacheRepository.save(tache);
@@ -148,6 +212,8 @@ public class TacheService {
     public TacheResponseDTO updateStatut(Long id, Tache.StatutTache statut) {
         Tache tache = tacheRepository.findById(id)
                 .orElseThrow(() -> new ResourceNotFoundException("Tâche non trouvée : " + id));
+        verifierTacheAccessible(tache, getCurrentUser());
+        verifierModificationSecretaire(tache, getCurrentUser());
         tache.setStatut(statut);
         updateDatesStatut(tache);
         return enrich(tacheMapper.toResponseDTO(tacheRepository.save(tache)), tache);
@@ -155,11 +221,118 @@ public class TacheService {
 
     @Transactional
     public void delete(Long id) {
+        Employer current = getCurrentUser();
+        if (isSecretary(current)) throw new org.springframework.security.access.AccessDeniedException("La suppression des tâches est interdite au rôle SECRETAIRE.");
         if (!tacheRepository.existsById(id)) {
             throw new ResourceNotFoundException("Tâche non trouvée : " + id);
         }
+        Tache tache = tacheRepository.findByIdWithRelations(id)
+                .orElseThrow(() -> new ResourceNotFoundException("Tâche non trouvée : " + id));
+        verifierTacheAccessible(tache, current);
         tacheRepository.deleteById(id);
         log.info("Tâche supprimée : {}", id);
+    }
+
+    private boolean isSecretary(Employer user) { return user.getRole() != null && "SECRETAIRE".equals(user.getRole().getName()); }
+    private boolean isAdmin(Employer user) { return user.getRole() != null && "ADMIN".equals(user.getRole().getName()); }
+    private boolean isSuperAdmin(Employer user) { return user.getRole() != null && "SUPER_ADMIN".equals(user.getRole().getName()); }
+
+    private void configurerPerimetreTache(Tache tache, Employer createur, Projet projet,
+                                          Long sucursalId, Employer assignee) {
+        verifierProjetAccessible(createur, projet);
+        Entreprise entreprise = projet.getEntreprise();
+        if (entreprise == null) throw new IllegalArgumentException("Le projet doit être rattaché à une entreprise.");
+
+        Sucursal sucursal = null;
+        Long cibleSucursalId = sucursalId != null ? sucursalId
+                : projet.getSucursal() != null ? projet.getSucursal().getId() : null;
+        if (cibleSucursalId != null) {
+            sucursal = sucursalRepository.findById(cibleSucursalId)
+                    .orElseThrow(() -> new ResourceNotFoundException("Succursale introuvable : " + cibleSucursalId));
+            if (sucursal.getEntreprise() == null || !entreprise.getId().equals(sucursal.getEntreprise().getId()))
+                throw new IllegalArgumentException("La succursale choisie ne correspond pas à l'entreprise du projet.");
+        }
+        if (projet.getSucursal() != null && (sucursal == null || !projet.getSucursal().getId().equals(sucursal.getId())))
+            throw new IllegalArgumentException("La succursale doit correspondre à celle du projet.");
+
+        Long scopeSucursal = entrepriseContextService.getScopeSucursalId();
+        if (scopeSucursal != null && (sucursal == null || !scopeSucursal.equals(sucursal.getId())))
+            throw new org.springframework.security.access.AccessDeniedException("Action hors de votre succursale.");
+        if (assignee != null) {
+            if (assignee.getEntreprise() == null || !entreprise.getId().equals(assignee.getEntreprise().getId()))
+                throw new IllegalArgumentException("La personne assignée doit appartenir à l'entreprise du projet.");
+            if (sucursal != null && (assignee.getSucursal() == null || !sucursal.getId().equals(assignee.getSucursal().getId())))
+                throw new IllegalArgumentException("La personne assignée doit appartenir à la succursale de la tâche.");
+        }
+        tache.setEntreprise(entreprise);
+        tache.setSucursal(sucursal);
+    }
+
+    private void verifierProjetAccessible(Employer user, Projet projet) {
+        if (isSuperAdmin(user)) return;
+        if (user.getEntreprise() == null || projet.getEntreprise() == null
+                || !user.getEntreprise().getId().equals(projet.getEntreprise().getId()))
+            throw new org.springframework.security.access.AccessDeniedException("Projet hors de votre entreprise.");
+        Long scopeSucursal = entrepriseContextService.getScopeSucursalId();
+        if (scopeSucursal != null && (projet.getSucursal() == null
+                || !scopeSucursal.equals(projet.getSucursal().getId())))
+            throw new org.springframework.security.access.AccessDeniedException("Projet hors de votre succursale.");
+    }
+
+    private void verifierEmployeAccessible(Employer user, Employer employee) {
+        if (isSuperAdmin(user)) return;
+        if (user.getEntreprise() == null || employee.getEntreprise() == null
+                || !user.getEntreprise().getId().equals(employee.getEntreprise().getId()))
+            throw new org.springframework.security.access.AccessDeniedException("Employé hors de votre entreprise.");
+        Long scopeSucursal = entrepriseContextService.getScopeSucursalId();
+        if (scopeSucursal != null && (employee.getSucursal() == null
+                || !scopeSucursal.equals(employee.getSucursal().getId())))
+            throw new org.springframework.security.access.AccessDeniedException("Employé hors de votre succursale.");
+    }
+
+    private boolean estTacheDansScope(Employer user, Tache tache) {
+        if (isSuperAdmin(user)) return true;
+        if (user.getEntreprise() == null || tache.getEntreprise() == null
+                || !user.getEntreprise().getId().equals(tache.getEntreprise().getId())) return false;
+        Long scopeSucursal = entrepriseContextService.getScopeSucursalId();
+        return scopeSucursal == null || (tache.getSucursal() != null
+                && scopeSucursal.equals(tache.getSucursal().getId()));
+    }
+
+    private void verifierTacheAccessible(Tache tache, Employer user) {
+        if (isSuperAdmin(user)) return;
+        if (user.getEntreprise() == null || tache.getEntreprise() == null
+                || !user.getEntreprise().getId().equals(tache.getEntreprise().getId()))
+            throw new ResourceNotFoundException("Tâche non trouvée : " + tache.getId());
+        Long scopeSucursal = entrepriseContextService.getScopeSucursalId();
+        if (scopeSucursal != null && (tache.getSucursal() == null
+                || !scopeSucursal.equals(tache.getSucursal().getId())))
+            throw new ResourceNotFoundException("Tâche non trouvée : " + tache.getId());
+        verifierLectureSecretaire(tache, user);
+    }
+    private boolean dansSuccursale(Employer user, Tache t) {
+        return user.getEntreprise() != null && user.getSucursal() != null && t.getEntreprise() != null && t.getSucursal() != null
+                && user.getEntreprise().getId().equals(t.getEntreprise().getId())
+                && user.getSucursal().getId().equals(t.getSucursal().getId());
+    }
+    private void verifierLectureSecretaire(Tache t, Employer user) {
+        if (isSecretary(user) && !dansSuccursale(user, t)) throw new ResourceNotFoundException("Tâche non trouvée : " + t.getId());
+    }
+    private void verifierModificationSecretaire(Tache t, Employer user) {
+        if (isSecretary(user) && (t.getCreateur() == null || !user.getId().equals(t.getCreateur().getId()) || !dansSuccursale(user, t)))
+            throw new org.springframework.security.access.AccessDeniedException("Vous pouvez modifier uniquement vos tâches de votre succursale.");
+    }
+    private void verifierMemeSuccursale(Employer user, com.example.backend_sirhgp.model.Entreprise ent,
+                                        com.example.backend_sirhgp.model.Sucursal suc) {
+        if (user.getEntreprise() == null || user.getSucursal() == null || ent == null || suc == null
+                || !user.getEntreprise().getId().equals(ent.getId()) || !user.getSucursal().getId().equals(suc.getId()))
+            throw new org.springframework.security.access.AccessDeniedException("Les personnes, projets et tâches doivent rester dans votre succursale.");
+    }
+    private Page<TacheResponseDTO> page(List<TacheResponseDTO> items, Pageable pageable) {
+        if (pageable.isUnpaged()) return new PageImpl<>(items);
+        int from = Math.min((int) pageable.getOffset(), items.size());
+        int to = Math.min(from + pageable.getPageSize(), items.size());
+        return new PageImpl<>(items.subList(from, to), pageable, items.size());
     }
 
     // ─── Utilitaires ─────────────────────────────────────────

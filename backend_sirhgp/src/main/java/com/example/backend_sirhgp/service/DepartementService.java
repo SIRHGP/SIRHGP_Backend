@@ -15,6 +15,9 @@ import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
+import java.util.List;
+import java.util.Set;
+import java.util.stream.Collectors;
 
 /**
  * CORRECTIONS :
@@ -34,6 +37,7 @@ public class DepartementService {
     private final PosteRepository posteRepository;
     private final EmployerRepository employerRepository;
     private final DepartementMapper departementMapper;
+    private final EntrepriseContextService entrepriseContextService;
 
     @Transactional
     public DepartementResponseDTO create(DepartementRequestDTO dto) {
@@ -43,6 +47,7 @@ public class DepartementService {
         }
 
         Departement dep = Departement.builder().name(name).build();
+        appliquerSuperviseur(dep, dto.getSuperviseurId());
         dep = departementRepository.save(dep);
 
         // Association des postes si fournis
@@ -59,15 +64,63 @@ public class DepartementService {
     // CORRECTION : pagination
     @Transactional(readOnly = true)
     public Page<DepartementResponseDTO> findAll(Pageable pageable) {
-        return departementRepository.findAll(pageable)
-                .map(this::enrichAndMap);
+        Set<Long> allowed = allowedDepartmentIds();
+        if (allowed == null) return departementRepository.findAll(pageable).map(this::enrichAndMap);
+        List<DepartementResponseDTO> items = departementRepository.findAll().stream()
+                .filter(d -> allowed.contains(d.getId())).map(this::enrichAndMap).toList();
+        if (pageable.isUnpaged()) return new org.springframework.data.domain.PageImpl<>(items);
+        int from = Math.min((int) pageable.getOffset(), items.size());
+        int to = Math.min(from + pageable.getPageSize(), items.size());
+        return new org.springframework.data.domain.PageImpl<>(items.subList(from, to), pageable, items.size());
     }
 
     @Transactional(readOnly = true)
     public DepartementResponseDTO findById(Long id) {
         Departement dep = departementRepository.findByIdWithPostes(id)
                 .orElseThrow(() -> new ResourceNotFoundException("Département non trouvé : " + id));
+        verifierLecture(dep.getId());
         return enrichAndMap(dep);
+    }
+
+    private Set<Long> allowedDepartmentIds() {
+        String role = entrepriseContextService.currentRole();
+        if ("SUPER_ADMIN".equals(role)) return null;
+        // Le modèle departements est une table de référence globale (aucune
+        // colonne entreprise_id). L'ADMIN doit donc pouvoir charger la liste
+        // complète; MANAGER et LEAD restent limités par leurs rattachements.
+        if ("ADMIN".equals(role)) {
+            return departementRepository.findAll().stream()
+                    .map(Departement::getId).collect(Collectors.toUnmodifiableSet());
+        }
+        Long entrepriseId = entrepriseContextService.getScopeEntrepriseId();
+        if (entrepriseId == null) return Set.of();
+        Long sucursalId = entrepriseContextService.getScopeSucursalId();
+        if ("MANAGER".equals(role) && sucursalId == null) return Set.of();
+        List<Long> ids;
+        if ("LEAD".equals(role)) {
+            List<Long> leadIds = entrepriseContextService.getScopeDepartementIds();
+            if (leadIds.isEmpty()) {
+                ids = sucursalId == null ? departementRepository.findIdsByEntrepriseId(entrepriseId)
+                        : departementRepository.findIdsBySucursalId(sucursalId, entrepriseId);
+            } else if (sucursalId == null) {
+                Set<Long> companyIds = Set.copyOf(departementRepository.findIdsByEntrepriseId(entrepriseId));
+                ids = leadIds.stream().filter(companyIds::contains).toList();
+            } else {
+                Set<Long> branchIds = Set.copyOf(departementRepository.findIdsBySucursalId(sucursalId, entrepriseId));
+                ids = leadIds.stream().filter(branchIds::contains).toList();
+            }
+        } else if (sucursalId != null) {
+            ids = departementRepository.findIdsBySucursalId(sucursalId, entrepriseId);
+        } else {
+            ids = departementRepository.findIdsByEntrepriseId(entrepriseId);
+        }
+        return Set.copyOf(ids);
+    }
+
+    private void verifierLecture(Long id) {
+        Set<Long> allowed = allowedDepartmentIds();
+        if (allowed != null && !allowed.contains(id))
+            throw new ResourceNotFoundException("Département non trouvé : " + id);
     }
 
     @Transactional
@@ -83,8 +136,32 @@ public class DepartementService {
             dep.setName(newName);
         }
 
+        if (dto.getSuperviseurId() != null) {
+            appliquerSuperviseur(dep, dto.getSuperviseurId());
+        }
+
         dep = departementRepository.save(dep);
         return enrichAndMap(dep);
+    }
+
+    private void appliquerSuperviseur(Departement departement, Long superviseurId) {
+        if (superviseurId == null) return;
+        var superviseur = employerRepository.findById(superviseurId)
+                .orElseThrow(() -> new ResourceNotFoundException("Chef de département introuvable : " + superviseurId));
+        if (superviseur.getRole() == null || !"LEAD".equals(superviseur.getRole().getName())) {
+            throw new IllegalArgumentException("Le chef de département doit avoir le rôle LEAD");
+        }
+        Long scopeEntreprise = entrepriseContextService.getScopeEntrepriseId();
+        if (scopeEntreprise != null && (superviseur.getEntreprise() == null
+                || !scopeEntreprise.equals(superviseur.getEntreprise().getId()))) {
+            throw new IllegalArgumentException("Le chef de département doit appartenir à votre entreprise");
+        }
+        Long scopeSucursal = entrepriseContextService.getScopeSucursalId();
+        if (scopeSucursal != null && (superviseur.getSucursal() == null
+                || !scopeSucursal.equals(superviseur.getSucursal().getId()))) {
+            throw new IllegalArgumentException("Le chef de département doit appartenir à votre succursale");
+        }
+        departement.setSuperviseur(superviseur);
     }
 
     @Transactional
@@ -134,8 +211,12 @@ public class DepartementService {
 
     private DepartementResponseDTO enrichAndMap(Departement dep) {
         DepartementResponseDTO dto = departementMapper.toResponseDTO(dep);
-        // CORRECTION : COUNT via requêtes dédiées — pas en chargeant les collections
-        dto.setNombreEmployes(employerRepository.countActifsByDepartementId(dep.getId()));
+        // L'ADMIN reçoit le catalogue global, mais les effectifs restent propres à son entreprise.
+        Long entrepriseId = "ADMIN".equals(entrepriseContextService.currentRole())
+                ? entrepriseContextService.getScopeEntrepriseId() : null;
+        dto.setNombreEmployes(entrepriseId == null
+                ? employerRepository.countActifsByDepartementId(dep.getId())
+                : employerRepository.countActifsByDepartementIdAndEntrepriseId(dep.getId(), entrepriseId));
         dto.setNombrePostes((long) dep.getPostes().size());
         // nombreProjets calculé via requête COUNT (à ajouter dans ProjetRepository si nécessaire)
         return dto;

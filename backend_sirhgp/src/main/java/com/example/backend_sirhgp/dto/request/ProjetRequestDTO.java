@@ -40,4 +40,5 @@ public class ProjetRequestDTO {
 
     private Set<Long> membresIds;
     private Set<Long> departementIds;
+    private Long sucursalId;
 }

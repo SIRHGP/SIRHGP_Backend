@@ -29,6 +29,8 @@ public class TacheResponseDTO {
     private ProjetResponseDTO.EmployerSummaryDTO assignee;
     private ProjetResponseDTO.EmployerSummaryDTO createur;
     private ProjetSummaryDTO projet;
+    private Long projetId;
+    private Long sucursalId;
 
     private Long nombreCommentaires;
     // CORRECTION : List (ordonné) au lieu de Set (non ordonné)

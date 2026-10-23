@@ -7,6 +7,7 @@ import com.example.backend_sirhgp.model.Employer;
 import com.example.backend_sirhgp.model.Entreprise;
 import com.example.backend_sirhgp.model.Pointage;
 import com.example.backend_sirhgp.repository.PointageRepository;
+import com.example.backend_sirhgp.repository.EmployerRepository;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
@@ -33,6 +34,7 @@ public class PointageService {
 
     private final PointageRepository pointageRepository;
     private final EntrepriseContextService entrepriseContextService;
+    private final EmployerRepository employerRepository;
 
     private Employer requireCurrentUser() {
         Employer current = entrepriseContextService.getCurrentEmployer();
@@ -52,24 +54,34 @@ public class PointageService {
 
     @Transactional
     public PointageResponseDTO clockIn() {
-        Employer current = requireCurrentUser();
+        throw new org.springframework.security.access.AccessDeniedException(
+                "L'arrivée est enregistrée par le secrétariat de direction.");
+    }
+
+    @Transactional
+    public PointageResponseDTO clockInForEmployee(Long employeId) {
+        Employer secretary = requireCurrentUser();
+        if (secretary.getRole() == null || !"SECRETAIRE".equals(secretary.getRole().getName())) {
+            throw new org.springframework.security.access.AccessDeniedException("Accès réservé au secrétariat.");
+        }
+        if (secretary.getSucursal() == null || secretary.getEntreprise() == null) {
+            throw new org.springframework.security.access.AccessDeniedException("Votre compte n'est pas rattaché à une succursale.");
+        }
+        Employer target = employerRepository.findById(employeId)
+                .orElseThrow(() -> new ResourceNotFoundException("Employé non trouvé : " + employeId));
+        if (!target.isActif() || target.getSucursal() == null
+                || !secretary.getSucursal().getId().equals(target.getSucursal().getId())
+                || target.getEntreprise() == null
+                || !secretary.getEntreprise().getId().equals(target.getEntreprise().getId())) {
+            throw new org.springframework.security.access.AccessDeniedException("Employé hors de votre succursale.");
+        }
         LocalDate today = LocalDate.now();
         checkJourOuvre(today);
-
-        pointageRepository.findByEmployeIdAndDate(current.getId(), today).ifPresent(p -> {
-            throw new IllegalArgumentException(p.getDepart() == null
-                    ? "Vous avez déjà pointé votre arrivée aujourd'hui — pointez votre départ"
-                    : "La journée du jour est déjà complète");
-        });
-
-        Pointage p = Pointage.builder()
-                .date(today)
-                .arrivee(LocalDateTime.now())
-                .employe(current)
-                .entreprise(current.getEntreprise())
-                .build();
-        p = pointageRepository.save(p);
-        log.info("Pointage arrivée : {} à {}", current.getEmail(), p.getArrivee());
+        if (pointageRepository.findByEmployeIdAndDate(target.getId(), today).isPresent()) {
+            throw new IllegalArgumentException("Une arrivée est déjà enregistrée pour cet employé aujourd'hui.");
+        }
+        Pointage p = pointageRepository.save(Pointage.builder().date(today).arrivee(LocalDateTime.now())
+                .employe(target).entreprise(target.getEntreprise()).build());
         return toDTO(p);
     }
 
@@ -98,29 +110,8 @@ public class PointageService {
     /** Rattrapage d'oubli : saisie manuelle de l'heure de départ (marqué « corrigé »). */
     @Transactional
     public PointageResponseDTO corrigerDepart(Long id, LocalTime heureDepart) {
-        Employer current = requireCurrentUser();
-        Pointage p = pointageRepository.findById(id)
-                .orElseThrow(() -> new ResourceNotFoundException("Pointage non trouvé : " + id));
-        if (!current.getId().equals(p.getEmploye().getId())) {
-            throw new org.springframework.security.access.AccessDeniedException(
-                    "Vous ne pouvez corriger que vos propres pointages");
-        }
-
-        LocalDateTime depart = p.getDate().atTime(heureDepart);
-        if (!depart.isAfter(p.getArrivee())) {
-            throw new IllegalArgumentException(
-                    "L'heure de départ doit être postérieure à l'heure d'arrivée ("
-                            + p.getArrivee().toLocalTime() + ")");
-        }
-        if (depart.isAfter(LocalDateTime.now())) {
-            throw new IllegalArgumentException("Impossible de saisir une heure de départ dans le futur");
-        }
-
-        p.setDepart(depart);
-        p.setCorrige(true);
-        p = pointageRepository.save(p);
-        log.info("Départ corrigé : {} ({})", current.getEmail(), depart);
-        return toDTO(p);
+        throw new org.springframework.security.access.AccessDeniedException(
+                "La correction manuelle du départ n'est plus autorisée.");
     }
 
     @Transactional(readOnly = true)

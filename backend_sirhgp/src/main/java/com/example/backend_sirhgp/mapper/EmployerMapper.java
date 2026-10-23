@@ -5,9 +5,11 @@ import com.example.backend_sirhgp.dto.request.EmployerUpdateDTO;
 import com.example.backend_sirhgp.dto.response.EmployerResponseDTO;
 import com.example.backend_sirhgp.model.Employer;
 import org.mapstruct.Builder;
+import org.mapstruct.BeanMapping;
 import org.mapstruct.Mapper;
 import org.mapstruct.Mapping;
 import org.mapstruct.MappingTarget;
+import org.mapstruct.NullValuePropertyMappingStrategy;
 import org.mapstruct.ReportingPolicy;
 
 /**
@@ -28,6 +30,13 @@ public interface EmployerMapper {
     @Mapping(source = "poste.departement.name", target = "departementNom")
     @Mapping(source = "role.id",                target = "roleId")
     @Mapping(source = "role.name",              target = "roleName")
+    @Mapping(source = "manager.id",              target = "managerId")
+    @Mapping(source = "manager.name",            target = "managerName")
+    @Mapping(source = "entreprise.id",           target = "entrepriseId")
+    @Mapping(source = "entreprise.name",         target = "entrepriseNom")
+    @Mapping(source = "sucursal.id",             target = "sucursalId")
+    @Mapping(source = "sucursal.name",           target = "sucursalName")
+    @Mapping(source = "poste.name",              target = "posteName")
     EmployerResponseDTO toResponseDTO(Employer employer);
 
     @Mapping(target = "id",               ignore = true)
@@ -36,6 +45,10 @@ public interface EmployerMapper {
     @Mapping(target = "dateCreation",     ignore = true)
     @Mapping(target = "dateModification", ignore = true)
     @Mapping(target = "actif",            ignore = true)
+    @Mapping(target = "motDePasseTemporaire", ignore = true)
+    @Mapping(target = "entreprise",        ignore = true)
+    @Mapping(target = "sucursal",          ignore = true)
+    @Mapping(target = "manager",           ignore = true)
     // CORRECTION : authorities ignoré — méthode de UserDetails, pas un champ mappable
     @Mapping(target = "authorities",      ignore = true)
     @Mapping(source = "motDePasse",       target = "motDePasse")
@@ -48,7 +61,12 @@ public interface EmployerMapper {
     @Mapping(target = "role",             ignore = true)
     @Mapping(target = "dateCreation",     ignore = true)
     @Mapping(target = "dateModification", ignore = true)
+    @Mapping(target = "motDePasseTemporaire", ignore = true)
+    @Mapping(target = "entreprise",        ignore = true)
+    @Mapping(target = "sucursal",          ignore = true)
+    @Mapping(target = "manager",           ignore = true)
     // CORRECTION : authorities ignoré
     @Mapping(target = "authorities",      ignore = true)
+    @BeanMapping(nullValuePropertyMappingStrategy = NullValuePropertyMappingStrategy.IGNORE)
     void updateEntity(@MappingTarget Employer entity, EmployerUpdateDTO dto);
 }

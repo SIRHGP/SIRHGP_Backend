@@ -5,7 +5,7 @@ import lombok.Data;
 import java.math.BigDecimal;
 import java.time.LocalDate;
 import java.time.LocalDateTime;
-import java.util.Set;
+import java.util.List;
 
 @Data
 public class FactureResponseDTO {
@@ -42,7 +42,7 @@ public class FactureResponseDTO {
     private EmployerSummaryDTO emetteur;
     private EmployerSummaryDTO client;
 
-    private Set<LigneFactureResponseDTO> lignesFacture;
+    private List<LigneFactureResponseDTO> lignesFacture;
 
     // Indicateurs calculés
     private Double pourcentagePaye;

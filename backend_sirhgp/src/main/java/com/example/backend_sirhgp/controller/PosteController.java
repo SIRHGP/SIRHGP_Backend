@@ -31,6 +31,12 @@ public class PosteController {
 
     private final PosteService posteService;
 
+    @GetMapping("/stats")
+    @PreAuthorize("hasAnyRole('SUPER_ADMIN', 'ADMIN', 'MANAGER', 'LEAD')")
+    public ResponseEntity<ApiResponse<java.util.Map<String, Long>>> getStats() {
+        return ResponseEntity.ok(new ApiResponse<>(true, "Statistiques des postes", posteService.getStats()));
+    }
+
     @PostMapping
     public ResponseEntity<ApiResponse<PosteResponseDTO>> create(
             @Valid @RequestBody PosteRequestDTO dto) {
@@ -40,6 +46,7 @@ public class PosteController {
     }
 
     @GetMapping
+    @PreAuthorize("hasAnyRole('SUPER_ADMIN', 'ADMIN', 'MANAGER', 'LEAD')")
     public ResponseEntity<ApiResponse<Page<PosteResponseDTO>>> getAll(Pageable pageable) {
         return ResponseEntity.ok(
                 new ApiResponse<>(true, "Postes récupérés avec succès",
@@ -47,6 +54,7 @@ public class PosteController {
     }
 
     @GetMapping("/{id}")
+    @PreAuthorize("hasAnyRole('SUPER_ADMIN', 'ADMIN', 'MANAGER', 'LEAD')")
     public ResponseEntity<ApiResponse<PosteResponseDTO>> getById(@PathVariable Long id) {
         return ResponseEntity.ok(
                 new ApiResponse<>(true, "Poste récupéré avec succès",
@@ -54,6 +62,7 @@ public class PosteController {
     }
 
     @GetMapping("/by-departement/{departementId}")
+    @PreAuthorize("hasAnyRole('SUPER_ADMIN', 'ADMIN', 'MANAGER', 'LEAD')")
     public ResponseEntity<ApiResponse<List<PosteResponseDTO>>> getByDepartement(
             @PathVariable Long departementId) {
         return ResponseEntity.ok(

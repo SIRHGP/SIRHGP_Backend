@@ -2,6 +2,7 @@ package com.example.backend_sirhgp.service;
 
 import com.example.backend_sirhgp.dto.request.RoleRequestDTO;
 import com.example.backend_sirhgp.dto.response.RoleResponseDTO;
+import com.example.backend_sirhgp.dto.response.RoleFilterDTO;
 import com.example.backend_sirhgp.exception.ResourceNotFoundException;
 import com.example.backend_sirhgp.mapper.RoleMapper;
 import com.example.backend_sirhgp.model.Permission;
@@ -26,6 +27,13 @@ import java.util.stream.Collectors;
 public class RoleService {
 
     private final RoleRepository roleRepository;
+
+    @Transactional(readOnly = true)
+    public java.util.List<RoleFilterDTO> findForFilters() {
+        return roleRepository.findAllForFilters().stream()
+                .map(role -> new RoleFilterDTO(role.getId(), role.getName()))
+                .toList();
+    }
     private final PermissionRepository permissionRepository;
     private final RoleMapper roleMapper;
 

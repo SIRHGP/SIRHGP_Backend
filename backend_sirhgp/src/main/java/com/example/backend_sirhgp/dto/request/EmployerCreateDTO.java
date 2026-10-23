@@ -3,6 +3,7 @@ package com.example.backend_sirhgp.dto.request;
 import jakarta.validation.constraints.*;
 import lombok.Data;
 import java.time.LocalDate;
+import java.math.BigDecimal;
 
 /**
  * DTO de création d'un employé.
@@ -37,9 +38,18 @@ public class EmployerCreateDTO {
 
     private LocalDate dateEmbauche;
 
+    @DecimalMin(value = "0.0", message = "Le salaire de base ne peut pas être négatif")
+    private BigDecimal salaireBase;
+    private String nui;
+    private String rib;
+    private String cvUrl;
+
     @NotNull(message = "Le poste est obligatoire")
     private Long posteId;
 
     @NotNull(message = "Le rôle est obligatoire")
     private Long roleId;
+    private Long entrepriseId;
+    private Long sucursalId;
+    private Long managerId;
 }

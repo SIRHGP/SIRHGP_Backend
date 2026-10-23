@@ -87,6 +87,14 @@ public class Projet {
     @JoinColumn(name = "chef_projet_id")
     private Employer chefProjet;
 
+    @ManyToOne(fetch = FetchType.LAZY)
+    @JoinColumn(name = "entreprise_id")
+    private Entreprise entreprise;
+
+    @ManyToOne(fetch = FetchType.LAZY)
+    @JoinColumn(name = "sucursal_id")
+    private Sucursal sucursal;
+
     @ManyToMany
     @JoinTable(
             name = "projet_membres",

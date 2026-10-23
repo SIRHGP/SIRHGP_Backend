@@ -10,6 +10,7 @@ import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
+import java.util.List;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.access.prepost.PreAuthorize;
@@ -26,12 +27,13 @@ import org.springframework.web.bind.annotation.*;
 @RestController
 @RequestMapping("/api/employers")
 @RequiredArgsConstructor
-@PreAuthorize("hasAnyRole('SUPER_ADMIN', 'ADMIN')")
+@PreAuthorize("hasAnyRole('SUPER_ADMIN', 'ADMIN', 'MANAGER', 'LEAD')")
 public class EmployerController {
 
     private final EmployerService employerService;
 
     @PostMapping
+    @PreAuthorize("hasAnyRole('SUPER_ADMIN', 'ADMIN')")
     public ResponseEntity<ApiResponse<EmployerResponseDTO>> create(
             @Valid @RequestBody EmployerCreateDTO dto) {
         return ResponseEntity.status(HttpStatus.CREATED)
@@ -44,6 +46,16 @@ public class EmployerController {
         return ResponseEntity.ok(
                 new ApiResponse<>(true, "Employés récupérés avec succès",
                         employerService.findAll(pageable)));
+    }
+
+    @GetMapping("/leads")
+    public ResponseEntity<ApiResponse<List<EmployerResponseDTO>>> getLeads() {
+        return ResponseEntity.ok(new ApiResponse<>(true, "Responsables récupérés", employerService.findLeads()));
+    }
+
+    @GetMapping("/organigramme")
+    public ResponseEntity<ApiResponse<List<EmployerResponseDTO>>> getOrganigramme() {
+        return ResponseEntity.ok(new ApiResponse<>(true, "Organigramme récupéré", employerService.findOrganigramme()));
     }
 
     @GetMapping("/{id}")
@@ -61,6 +73,7 @@ public class EmployerController {
     }
 
     @PutMapping("/{id}")
+    @PreAuthorize("hasAnyRole('SUPER_ADMIN', 'ADMIN')")
     public ResponseEntity<ApiResponse<EmployerResponseDTO>> update(
             @PathVariable Long id,
             @Valid @RequestBody EmployerUpdateDTO dto) {
@@ -74,6 +87,7 @@ public class EmployerController {
      * PATCH /api/employers/{id}/change-password
      */
     @PatchMapping("/{id}/change-password")
+    @PreAuthorize("hasAnyRole('SUPER_ADMIN', 'ADMIN')")
     public ResponseEntity<ApiResponse<Void>> changePassword(
             @PathVariable Long id,
             @RequestParam String ancienMotDePasse,
@@ -92,7 +106,7 @@ public class EmployerController {
     }
 
     @PatchMapping("/{id}/toggle-actif")
-    @PreAuthorize("hasRole('SUPER_ADMIN')")
+    @PreAuthorize("hasAnyRole('SUPER_ADMIN', 'ADMIN')")
     public ResponseEntity<ApiResponse<EmployerResponseDTO>> toggleActif(@PathVariable Long id) {
         EmployerResponseDTO updated = employerService.toggleActif(id);
         String msg = updated.isActif() ? "Employé activé" : "Employé désactivé";

@@ -2,11 +2,12 @@ package com.example.backend_sirhgp.config;
 
 import com.example.backend_sirhgp.model.*;
 import com.example.backend_sirhgp.repository.*;
-import jakarta.annotation.PostConstruct;
 import lombok.RequiredArgsConstructor;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Value;
+import org.springframework.boot.ApplicationArguments;
+import org.springframework.boot.ApplicationRunner;
 import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.stereotype.Component;
 import org.springframework.transaction.annotation.Transactional;
@@ -17,7 +18,7 @@ import java.util.stream.Collectors;
 
 @Component
 @RequiredArgsConstructor
-public class ApplicationInitializer {
+public class ApplicationInitializer implements ApplicationRunner {
 
     private static final Logger log = LoggerFactory.getLogger(ApplicationInitializer.class);
 
@@ -32,26 +33,34 @@ public class ApplicationInitializer {
     @Value("${app.initialize-data:true}")
     private boolean initializeData;
 
-    @Value("${app.default-users.superadmin.password:SuperAdmin123!}")
+    @Value("${app.migrate-legacy-secretary-role:false}")
+    private boolean migrateLegacySecretaryRoleOnStartup;
+
+    @Value("${app.default-users.superadmin.password:}")
     private String superAdminPassword;
 
-    @Value("${app.default-users.admin.password:Admin123!}")
+    @Value("${app.default-users.admin.password:}")
     private String adminPassword;
 
-    @Value("${app.default-users.manager.password:Manager123!}")
+    @Value("${app.default-users.manager.password:}")
     private String managerPassword;
 
-    @Value("${app.default-users.staff.password:Staff123!}")
+    @Value("${app.default-users.staff.password:}")
     private String staffPassword;
 
-    @Value("${app.default-users.stagiaire.password:Stagiaire123!}")
+    @Value("${app.default-users.stagiaire.password:}")
     private String stagiairePassword;
 
-    @PostConstruct
+    @Override
     @Transactional
-    public void initializeAll() {
+    public void run(ApplicationArguments args) {
         if (!initializeData) {
             log.info("Initialisation désactivée (app.initialize-data=false)");
+            if (migrateLegacySecretaryRoleOnStartup) {
+                log.info("Migration contrôlée du rôle SECRETAIRE_DIRECTION activée");
+                migrateLegacySecretaryRole();
+                normaliserSecretairesActives();
+            }
             return;
         }
 
@@ -61,6 +70,8 @@ public class ApplicationInitializer {
 
         try {
             initializeRoles();
+            migrateLegacySecretaryRole();
+            normaliserSecretairesActives();
             initializeDepartements();
             Map<String, Action> actions = initializeActions();
             Map<String, Permission> permissions = initializePermissions(actions);
@@ -84,8 +95,10 @@ public class ApplicationInitializer {
                 new RoleConfig("SUPER_ADMIN", "Accès total à toutes les fonctionnalités"),
                 new RoleConfig("ADMIN", "Gestion des utilisateurs, paie et paramètres avancés"),
                 new RoleConfig("MANAGER", "Gestion des équipes et validation des demandes"),
+                new RoleConfig("LEAD", "Gestion des départements supervisés"),
                 new RoleConfig("STAFF", "Accès aux fonctionnalités de base"),
-                new RoleConfig("STAGIAIRE", "Accès limité en lecture seule")
+                new RoleConfig("STAGIAIRE", "Accès limité en lecture seule"),
+                new RoleConfig("SECRETAIRE", "Pointage des arrivées et accès transverse limité à sa succursale")
         );
         int created = 0;
         for (RoleConfig c : configs) {
@@ -96,6 +109,42 @@ public class ApplicationInitializer {
             }
         }
         log.info("→ {} rôle(s) créé(s)", created);
+    }
+
+    private void migrateLegacySecretaryRole() {
+        Optional<Role> legacyOpt = roleRepository.findByName("SECRETAIRE_DIRECTION");
+        if (legacyOpt.isEmpty()) return;
+        Role target = roleRepository.findByName("SECRETAIRE").orElseGet(() ->
+                roleRepository.save(Role.builder().name("SECRETAIRE")
+                        .description("Pointage des arrivées et accès transverse limité à sa succursale").build()));
+        Role legacy = legacyOpt.get();
+        if (legacy.getPermissions() != null) target.getPermissions().addAll(legacy.getPermissions());
+        for (Employer employer : employerRepository.findByRoleId(legacy.getId())) {
+            employer.setRole(target);
+            employerRepository.save(employer);
+        }
+        roleRepository.save(target);
+        roleRepository.delete(legacy);
+    }
+
+    private void normaliserSecretairesActives() {
+        Role secretary = roleRepository.findByName("SECRETAIRE").orElse(null);
+        Role staff = roleRepository.findByName("STAFF").orElse(null);
+        if (secretary == null || staff == null) return;
+        List<Employer> accounts = employerRepository.findByRoleId(secretary.getId()).stream()
+                .filter(Employer::isActif)
+                .sorted(Comparator.comparing(Employer::getDateCreation,
+                                Comparator.nullsLast(Comparator.naturalOrder()))
+                        .thenComparing(Employer::getId, Comparator.nullsLast(Comparator.naturalOrder())))
+                .toList();
+        Set<Long> branches = new HashSet<>();
+        for (Employer account : accounts) {
+            Long sucursalId = account.getSucursal() != null ? account.getSucursal().getId() : null;
+            if (sucursalId == null || !branches.add(sucursalId)) {
+                account.setRole(staff);
+                employerRepository.save(account);
+            }
+        }
     }
 
     // ===================== 2. DÉPARTEMENTS =====================
@@ -371,8 +420,17 @@ public class ApplicationInitializer {
                 "gestion_projets", "acces_dashboard", "gestion_documents",
                 "gestion_temps_conges"
         ), perms);
+        updateRolePermissions("LEAD", Set.of(
+                "gestion_equipe_limitee", "gestion_taches", "gestion_agenda",
+                "gestion_projets", "acces_dashboard", "gestion_temps_conges"
+        ), perms);
         updateRolePermissions("STAFF", Set.of("staff_basique", "gestion_documents"), perms);
         updateRolePermissions("STAGIAIRE", Set.of("stagiaire_basique"), perms);
+        updateRolePermissions("SECRETAIRE", Set.of(
+                "gestion_equipe_limitee", "gestion_projets", "gestion_taches",
+                "gestion_agenda", "gestion_documents", "gestion_temps_conges",
+                "acces_dashboard"
+        ), perms);
 
         log.info("→ Liaison rôles/permissions terminée");
     }
@@ -403,14 +461,16 @@ public class ApplicationInitializer {
                 new PosteConfig("Directeur Général", "SUPER_ADMIN", "Direction Générale", "Direction générale..."),
                 new PosteConfig("Responsable Paie", "ADMIN", "Direction Générale", "Administration de la paie..."),
                 new PosteConfig("Comptable", "MANAGER", "Direction Générale", "Gestion comptable..."),
-                new PosteConfig("Secrétaire de Direction", "STAFF", "Direction Générale", "Gestion administrative..."),
+                new PosteConfig("Secrétaire", "SECRETAIRE", "Direction Générale", "Gestion administrative et pointage des arrivées..."),
+                new PosteConfig("Chef de Département", "LEAD", "Informatique & Systèmes", "Encadrement du département..."),
                 new PosteConfig("Directeur Technique", "ADMIN", "Informatique & Systèmes", "Responsable technique..."),
                 new PosteConfig("Développeur", "MANAGER", "Informatique & Systèmes", "Développement logiciel..."),
                 new PosteConfig("Technicien Support", "STAFF", "Support & Opérations", "Support technique..."),
                 new PosteConfig("Cuisinier", "STAFF", "Auxiliaire", "Service de restauration"),
                 new PosteConfig("Chauffeur", "STAFF", "Auxiliaire", "Service de transport"),
                 new PosteConfig("Agent d'Entretien", "STAFF", "Auxiliaire", "Entretien des locaux"),
-                new PosteConfig("Agent de Sécurité", "STAFF", "Auxiliaire", "Sécurité des locaux")
+                new PosteConfig("Agent de Sécurité", "STAFF", "Auxiliaire", "Sécurité des locaux"),
+                new PosteConfig("Stagiaire", "STAGIAIRE", "Auxiliaire", "Accès de stage limité")
         );
 
         int created = 0, skipped = 0, errors = 0;
@@ -454,27 +514,56 @@ public class ApplicationInitializer {
                         LocalDate.of(1968,5,4), "+237690208244", "Yaoundé", "Centre", "Melen"),
                 new EmployeeConfig("Marie Claire Fokam", "admin@sirhgp.cm", adminPassword, "Directeur Technique", "ADMIN",
                         LocalDate.of(1980,3,15), "+237677123456", "Yaoundé", "Centre", "Bastos"),
-                new EmployeeConfig("Jean Pierre Mbarga", "manager@sirhgp.cm", managerPassword, "Technicien Support", "MANAGER",
+                new EmployeeConfig("Jean Pierre Mbarga", "manager@sirhgp.cm", managerPassword, "Comptable", "MANAGER",
                         LocalDate.of(1985,7,22), "+237699234567", "Yaoundé", "Centre", "Nlongkak"),
                 new EmployeeConfig("Aminatou Diallo", "staff@sirhgp.cm", staffPassword, "Développeur", "STAFF",
                         LocalDate.of(1992,11,8), "+237655345678", "Douala", "Littoral", "Akwa"),
-                new EmployeeConfig("Kevin Talla", "stagiaire@sirhgp.cm", stagiairePassword, "Développeur", "STAGIAIRE",
+                new EmployeeConfig("Kevin Talla", "stagiaire@sirhgp.cm", stagiairePassword, "Stagiaire", "STAGIAIRE",
                         LocalDate.of(2001,4,17), "+237674456789", "Yaoundé", "Centre", "Obili")
         );
 
-        int created = 0, skipped = 0;
+        int created = 0, skipped = 0, updated = 0;
         for (EmployeeConfig c : configs) {
             String email = c.email().toLowerCase().trim();
-            if (employerRepository.findByEmail(email).isPresent()) {
-                log.debug("→ Employé '{}' déjà existant, ignoré", email);
-                skipped++;
-                continue;
-            }
             Poste poste = posteRepository.findByName(c.posteNom().trim())
                     .orElseThrow(() -> new IllegalStateException("Poste '" + c.posteNom() + "' introuvable"));
             Role role = roleRepository.findByName(c.roleNom())
                     .orElseThrow(() -> new IllegalStateException("Rôle '" + c.roleNom() + "' introuvable"));
-
+            Optional<Employer> existing = employerRepository.findByEmail(email);
+            if (existing.isPresent()) {
+                Employer emp = existing.get();
+                // Les comptes de démonstration ont un rôle et un poste fixes ;
+                // resynchroniser évite les autorités supplémentaires d'un ancien poste.
+                emp.setRole(role);
+                emp.setPoste(poste);
+                // Si un mot de passe est fourni via variable d'environnement, on le met à jour
+                if (c.password() != null && !c.password().isBlank()) {
+                    emp.setMotDePasse(passwordEncoder.encode(c.password()));
+                    emp.setActif(true);
+                    employerRepository.save(emp);
+                    updated++;
+                    log.debug("→ Employé '{}' mis à jour (mot de passe réinitialisé)", email);
+                    continue;
+                }
+                employerRepository.save(emp);
+                log.debug("→ Employé '{}' déjà existant (pas de mot de passe fourni, inchangé)", email);
+                skipped++;
+                continue;
+            }
+            if (c.password() == null || c.password().isBlank()) {
+                String roleKey = switch (c.roleNom()) {
+                    case "SUPER_ADMIN" -> "superadmin";
+                    case "ADMIN" -> "admin";
+                    case "MANAGER" -> "manager";
+                    case "STAFF" -> "staff";
+                    case "STAGIAIRE" -> "stagiaire";
+                    default -> throw new IllegalStateException("Rôle de compte initial inconnu: " + c.roleNom());
+                };
+                log.warn("Compte de démonstration {} ignoré: définir app.default-users.{}.password pour le créer",
+                        email, roleKey);
+                skipped++;
+                continue;
+            }
             Employer emp = Employer.builder()
                     .name(c.name())
                     .email(email)
@@ -493,7 +582,7 @@ public class ApplicationInitializer {
             created++;
             log.info("✚ Employé créé : {} ({}) — rôle: {}", c.name(), email, c.roleNom());
         }
-        log.info("→ {} employé(s) créé(s), {} déjà existant(s)", created, skipped);
+        log.info("→ {} employé(s) créé(s), {} mis à jour, {} déjà existant(s)", created, updated, skipped);
     }
 
     // ===================== RECORDS INTERNES =====================

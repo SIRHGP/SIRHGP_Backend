@@ -41,6 +41,10 @@ public class Departement {
     @EqualsAndHashCode.Include
     private String name;
 
+    @ManyToOne(fetch = FetchType.LAZY)
+    @JoinColumn(name = "superviseur_id")
+    private Employer superviseur;
+
     // CORRECTION : absents dans le modèle original, présents dans le DTO
     @CreationTimestamp
     @Column(updatable = false)

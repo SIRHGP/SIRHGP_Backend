@@ -33,10 +33,13 @@ public interface DepartementMapper {
     @Mapping(target = "nombreEmployes",   ignore = true)
     @Mapping(target = "nombrePostes",     ignore = true)
     @Mapping(target = "nombreProjets",    ignore = true)
+    @Mapping(source = "superviseur.id", target = "superviseurId")
+    @Mapping(source = "superviseur.name", target = "superviseurName")
     DepartementResponseDTO toResponseDTO(Departement departement);
 
     @Mapping(target = "id",              ignore = true)  // CORRECTION
     @Mapping(target = "postes", ignore = true)
+    @Mapping(target = "superviseur", ignore = true)
     @Mapping(target = "dateCreation",    ignore = true)
     @Mapping(target = "dateModification", ignore = true)
     void updateEntity(@MappingTarget Departement entity, String name);

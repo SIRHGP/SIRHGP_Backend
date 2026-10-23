@@ -13,6 +13,8 @@ public class DepartementResponseDTO {
     private Long nombreEmployes;
     private Long nombrePostes;
     private Long nombreProjets;
+    private Long superviseurId;
+    private String superviseurName;
     private Set<PosteSummaryDTO> postes;
 
     @Data

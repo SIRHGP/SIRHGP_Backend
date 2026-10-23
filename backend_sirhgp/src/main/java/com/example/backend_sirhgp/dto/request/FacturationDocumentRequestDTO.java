@@ -8,7 +8,7 @@ import lombok.Data;
 
 import java.math.BigDecimal;
 import java.time.LocalDate;
-import java.util.Set;
+import java.util.List;
 
 /**
  * Champs de saisie d'un document du cycle (étape 2 — Bon de commande,
@@ -37,7 +37,7 @@ public class FacturationDocumentRequestDTO {
 
     /** Lignes de saisie (désignation, quantité, prix HT, compte produit). */
     @Valid
-    private Set<LigneFactureRequestDTO> lignesFacture;
+    private List<LigneFactureRequestDTO> lignesFacture;
 
     @DecimalMin(value = "0.0", message = "Le montant HT doit être positif ou nul")
     private BigDecimal montantHT;

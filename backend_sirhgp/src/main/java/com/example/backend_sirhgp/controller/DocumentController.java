@@ -44,6 +44,14 @@ public class DocumentController {
         return upload(dto, fichier);
     }
 
+    @PostMapping(value = "/me/cv", consumes = MediaType.MULTIPART_FORM_DATA_VALUE)
+    public ResponseEntity<ApiResponse<DocumentResponseDTO>> uploadMyCv(
+            @RequestParam(defaultValue = "Mon CV") String nom,
+            @RequestPart("fichier") MultipartFile fichier) throws IOException {
+        return ResponseEntity.status(201).body(new ApiResponse<>(true, "CV téléversé avec succès",
+                documentService.uploadMyCv(nom, fichier)));
+    }
+
     // ─── Transfert d'un document existant ─────────────────────────────────────
     @PostMapping("/{id}/transfer")
     public ResponseEntity<ApiResponse<DocumentResponseDTO>> transfer(

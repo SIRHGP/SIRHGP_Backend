@@ -10,8 +10,8 @@ import java.math.RoundingMode;
 import java.time.LocalDate;
 import java.time.LocalDateTime;
 import java.time.format.DateTimeFormatter;
-import java.util.HashSet;
-import java.util.Set;
+import java.util.ArrayList;
+import java.util.List;
 import java.util.UUID;
 
 @Entity
@@ -27,7 +27,7 @@ import java.util.UUID;
 @AllArgsConstructor
 @Builder
 @EqualsAndHashCode(onlyExplicitlyIncluded = true)
-@ToString(exclude = {"projet", "emetteur", "client", "lignesFacture"})
+@ToString(exclude = {"projet", "emetteur", "client", "entreprise", "lignesFacture"})
 public class Facture {
 
     @Id
@@ -76,6 +76,22 @@ public class Facture {
     @Enumerated(EnumType.STRING)
     private TypeFacture typeFacture;
 
+    @Enumerated(EnumType.STRING)
+    @Builder.Default
+    private SensFacture sens = SensFacture.VENTE;
+
+    private String module;
+    private String nomFournisseur;
+    private String nomDestinataire;
+    private Long factureOrigineId;
+
+    @Builder.Default
+    private Boolean assujettiTVA = true;
+
+    @Column(precision = 7, scale = 4)
+    @Builder.Default
+    private BigDecimal tauxTVA = new BigDecimal("0.1925");
+
     // ─── Dispatch (envoi au client) ───────────────────────────────────────────
     @Builder.Default
     private boolean estConsultee = false;
@@ -102,9 +118,14 @@ public class Facture {
     @JoinColumn(name = "client_id")
     private Employer client;
 
+    @ManyToOne(fetch = FetchType.LAZY)
+    @JoinColumn(name = "entreprise_id")
+    private Entreprise entreprise;
+
     @OneToMany(mappedBy = "facture", cascade = CascadeType.ALL, orphanRemoval = true)
+    @OrderColumn(name = "ordre_ligne")
     @Builder.Default
-    private Set<LigneFacture> lignesFacture = new HashSet<>();
+    private List<LigneFacture> lignesFacture = new ArrayList<>();
 
     @CreationTimestamp
     @Column(updatable = false)
@@ -120,7 +141,11 @@ public class Facture {
     }
 
     public enum TypeFacture {
-        ACOMPTE, SOLDE, AVOIR, REGULIERE
+        ACOMPTE, SOLDE, AVOIR, REGULIERE, BON_COMMANDE, PROFORMA
+    }
+
+    public enum SensFacture {
+        VENTE, ACHAT
     }
 
     // ─── Méthodes utilitaires ────────────────────────────────────────────────
@@ -138,22 +163,46 @@ public class Facture {
     }
 
     public void calculerMontants() {
+        this.lignesFacture.forEach(LigneFacture::calculerMontant);
         this.montantHT = this.lignesFacture.stream()
                 .map(LigneFacture::getMontantTotal)
                 .reduce(BigDecimal.ZERO, BigDecimal::add)
                 .setScale(2, RoundingMode.HALF_UP);
 
-        if (this.montantTVA == null) this.montantTVA = BigDecimal.ZERO;
+        if (!this.lignesFacture.isEmpty()) {
+            BigDecimal taux = this.tauxTVA != null ? this.tauxTVA : BigDecimal.ZERO;
+            BigDecimal facteurTVA = taux.compareTo(BigDecimal.ONE) > 0
+                    ? taux.divide(new BigDecimal("100"), 8, RoundingMode.HALF_UP)
+                    : taux;
+            boolean taxable = !Boolean.FALSE.equals(this.assujettiTVA);
+            this.lignesFacture.forEach(ligne -> {
+                BigDecimal tvaLigne = taxable
+                        ? ligne.getMontantTotal().multiply(facteurTVA).setScale(2, RoundingMode.HALF_UP)
+                        : BigDecimal.ZERO.setScale(2, RoundingMode.HALF_UP);
+                ligne.setMontantTVA(tvaLigne);
+            });
+            this.montantTVA = this.lignesFacture.stream()
+                    .map(LigneFacture::getMontantTVA)
+                    .reduce(BigDecimal.ZERO, BigDecimal::add)
+                    .setScale(2, RoundingMode.HALF_UP);
+        } else if (this.montantTVA == null) {
+            this.montantTVA = BigDecimal.ZERO;
+        }
         this.montantTTC = this.montantHT.add(this.montantTVA).setScale(2, RoundingMode.HALF_UP);
 
         if (this.montantPaye == null) this.montantPaye = BigDecimal.ZERO;
         this.montantRestant = this.montantTTC.subtract(this.montantPaye).setScale(2, RoundingMode.HALF_UP);
 
-        int comparePaye = this.montantPaye.compareTo(this.montantTTC);
-        if (comparePaye >= 0) {
-            this.statut = StatutFacture.PAYEE;
-        } else if (this.montantPaye.compareTo(BigDecimal.ZERO) > 0) {
-            this.statut = StatutFacture.PARTIELLEMENT_PAYEE;
+        if (this.statut != StatutFacture.ANNULEE) {
+            if (this.montantTTC.compareTo(BigDecimal.ZERO) > 0
+                    && this.montantPaye.compareTo(this.montantTTC) >= 0) {
+                this.statut = StatutFacture.PAYEE;
+            } else if (this.montantPaye.compareTo(BigDecimal.ZERO) > 0) {
+                this.statut = StatutFacture.PARTIELLEMENT_PAYEE;
+            } else if (this.statut == StatutFacture.PAYEE
+                    || this.statut == StatutFacture.PARTIELLEMENT_PAYEE) {
+                this.statut = StatutFacture.BROUILLON;
+            }
         }
 
         if (this.dateEcheance != null

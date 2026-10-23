@@ -12,6 +12,7 @@ import org.springframework.data.domain.Pageable;
 import org.springframework.format.annotation.DateTimeFormat;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
+import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.web.bind.annotation.*;
 
 import java.time.LocalDate;
@@ -39,10 +40,13 @@ public class EvenementController {
     }
 
     @GetMapping
-    public ResponseEntity<ApiResponse<Page<EvenementResponseDTO>>> getAll(Pageable pageable) {
+    public ResponseEntity<ApiResponse<Page<EvenementResponseDTO>>> getAll(
+            Pageable pageable,
+            @RequestParam(required = false) Long entrepriseId,
+            @RequestParam(required = false) Long sucursalId) {
         return ResponseEntity.ok(
                 new ApiResponse<>(true, "Événements récupérés avec succès",
-                        evenementService.findAll(pageable)));
+                        evenementService.findAll(pageable, entrepriseId, sucursalId)));
     }
 
     @GetMapping("/{id}")
@@ -87,6 +91,7 @@ public class EvenementController {
     }
 
     @DeleteMapping("/{id}")
+    @PreAuthorize("hasAnyRole('SUPER_ADMIN','ADMIN','MANAGER','LEAD','STAFF','STAGIAIRE')")
     public ResponseEntity<ApiResponse<Void>> delete(@PathVariable Long id) {
         evenementService.delete(id);
         return ResponseEntity.ok(

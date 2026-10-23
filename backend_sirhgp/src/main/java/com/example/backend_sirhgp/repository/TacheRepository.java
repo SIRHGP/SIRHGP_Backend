@@ -2,6 +2,8 @@ package com.example.backend_sirhgp.repository;
 
 import com.example.backend_sirhgp.model.Tache;
 import org.springframework.data.jpa.repository.JpaRepository;
+import org.springframework.data.domain.Page;
+import org.springframework.data.domain.Pageable;
 import org.springframework.data.jpa.repository.Query;
 import org.springframework.data.repository.query.Param;
 import org.springframework.stereotype.Repository;
@@ -22,6 +24,13 @@ import java.util.Optional;
  */
 @Repository
 public interface TacheRepository extends JpaRepository<Tache, Long> {
+
+    Page<Tache> findByEntrepriseId(Long entrepriseId, Pageable pageable);
+
+    Page<Tache> findByEntrepriseIdAndSucursalId(Long entrepriseId, Long sucursalId, Pageable pageable);
+
+    @Query("SELECT t.entreprise.id, COUNT(t) FROM Tache t WHERE t.entreprise IS NOT NULL GROUP BY t.entreprise.id")
+    List<Object[]> countGroupedByEntreprise();
 
     // ─── Filtres simples ──────────────────────────────────────
 
@@ -94,4 +103,12 @@ public interface TacheRepository extends JpaRepository<Tache, Long> {
             "WHERE t.projet.id = :projetId " +
             "ORDER BY t.priorite DESC, t.dateEcheance ASC")
     List<Tache> findByProjetIdWithAssignee(@Param("projetId") Long projetId);
+
+    @Query("SELECT t FROM Tache t " +
+            "LEFT JOIN FETCH t.assignee " +
+            "LEFT JOIN FETCH t.createur " +
+            "LEFT JOIN FETCH t.projet " +
+            "WHERE t.assignee.id = :assigneeId " +
+            "ORDER BY t.priorite DESC, t.dateEcheance ASC")
+    List<Tache> findByAssigneeIdWithRelations(@Param("assigneeId") Long assigneeId);
 }

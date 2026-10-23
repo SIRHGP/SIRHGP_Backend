@@ -1,6 +1,7 @@
 package com.example.backend_sirhgp.controller;
 
 import com.example.backend_sirhgp.dto.request.AuthRequestDTO;
+import com.example.backend_sirhgp.dto.request.EntrepriseSignupDTO;
 import com.example.backend_sirhgp.dto.request.EmployerCreateDTO;
 import com.example.backend_sirhgp.dto.response.AuthResponseDTO;
 import com.example.backend_sirhgp.dto.response.EmployerResponseDTO;
@@ -14,6 +15,8 @@ import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
+import org.springframework.security.authentication.AuthenticationServiceException;
+import org.springframework.security.core.AuthenticationException;
 import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.web.bind.annotation.*;
 
@@ -35,13 +38,24 @@ public class AuthController {
         try {
             AuthResponseDTO response = authService.authenticate(request);
             return ResponseEntity.ok(new ApiResponse<>(true, "Authentification réussie", response));
-        } catch (Exception e) {
-            // CORRECTION : log l'erreur réelle pour diagnostic dans la console backend
-            log.error("Échec login pour {} - Erreur: {} | Message: {}",
-                    request.getEmail(), e.getClass().getName(), e.getMessage());
+        } catch (AuthenticationServiceException e) {
+            log.error("Service d'authentification indisponible pour {}", request.getEmail(), e);
+            return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR)
+                    .body(new ApiResponse<>(false, "Le service de connexion est temporairement indisponible", null));
+        } catch (AuthenticationException e) {
+            // Ne pas révéler si l'adresse existe, mais conserver une réponse distincte des erreurs serveur.
+            log.warn("Échec d'authentification pour {} ({})", request.getEmail(), e.getClass().getSimpleName());
             return ResponseEntity.status(HttpStatus.UNAUTHORIZED)
                     .body(new ApiResponse<>(false, "Identifiants incorrects", null));
         }
+    }
+
+    @PostMapping("/register-entreprise")
+    public ResponseEntity<ApiResponse<EmployerResponseDTO>> registerEntreprise(
+            @Valid @RequestBody EntrepriseSignupDTO request) {
+        EmployerResponseDTO response = authService.registerEntreprise(request);
+        return ResponseEntity.status(HttpStatus.CREATED)
+                .body(new ApiResponse<>(true, "Entreprise et compte administrateur créés avec succès", response));
     }
 
     @PostMapping("/register")

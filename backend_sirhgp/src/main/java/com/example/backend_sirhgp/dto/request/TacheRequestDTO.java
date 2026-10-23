@@ -28,4 +28,6 @@ public class TacheRequestDTO {
 
     @NotNull(message = "Le projet est obligatoire")
     private Long projetId;
+
+    private Long sucursalId;
 }

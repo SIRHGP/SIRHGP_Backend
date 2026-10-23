@@ -3,6 +3,7 @@ package com.example.backend_sirhgp.dto.request;
 import jakarta.validation.constraints.*;
 import lombok.Data;
 import java.time.LocalDate;
+import java.math.BigDecimal;
 
 /**
  * DTO de mise à jour d'un employé.
@@ -26,7 +27,15 @@ public class EmployerUpdateDTO {
     private String numeroTelephone;
 
     private LocalDate dateEmbauche;
+    @DecimalMin(value = "0.0", message = "Le salaire de base ne peut pas être négatif")
+    private BigDecimal salaireBase;
+    private String nui;
+    private String rib;
+    private String cvUrl;
     private Long posteId;
     private Long roleId;
     private Boolean actif;
+    private Long entrepriseId;
+    private Long sucursalId;
+    private Long managerId;
 }

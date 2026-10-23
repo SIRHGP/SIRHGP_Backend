@@ -3,6 +3,10 @@
 .vscode/
 backend_sirhgp/uploads/
 
+/.env
+/.env.*
+!/.env.docker.example
+
 
 *.bak
 

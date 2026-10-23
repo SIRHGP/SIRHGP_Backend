@@ -7,6 +7,7 @@ import lombok.Data;
 import java.math.BigDecimal;
 import java.time.LocalDate;
 import java.time.LocalDateTime;
+import java.util.List;
 
 /**
  * Dossier de facturation (cycle 3 étapes) — états d'avancement calculés
@@ -40,7 +41,7 @@ public class FacturationCycleResponseDTO {
     private boolean etape3Faite;
     /** Étape en cours : 1..3 ; 4 = cycle clôturé. */
     private int etapeCourante;
-    /** Avancement 0 / 34 / 67 / 100. */
+    /** Avancement 0 / 33 / 67 / 100. */
     private int avancementPct;
     private boolean cloturee;
 
@@ -90,5 +91,6 @@ public class FacturationCycleResponseDTO {
         private BigDecimal montantRestant;
         /** Vrai si un PDF est téléchargeable (documents générés côté serveur). */
         private boolean pdfDisponible;
+        private List<LigneFactureResponseDTO> lignesFacture;
     }
 }

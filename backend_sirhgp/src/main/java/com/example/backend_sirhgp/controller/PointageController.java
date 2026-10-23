@@ -21,7 +21,7 @@ import java.util.List;
 @RestController
 @RequestMapping("/api/pointages")
 @RequiredArgsConstructor
-@PreAuthorize("hasAnyRole('STAGIAIRE', 'STAFF', 'LEAD', 'MANAGER', 'ADMIN')")
+@PreAuthorize("hasAnyRole('STAGIAIRE', 'STAFF', 'LEAD', 'MANAGER', 'ADMIN', 'SECRETAIRE')")
 public class PointageController {
 
     private final PointageService pointageService;

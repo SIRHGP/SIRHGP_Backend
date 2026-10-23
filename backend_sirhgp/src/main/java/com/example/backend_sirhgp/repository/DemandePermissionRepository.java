@@ -16,6 +16,12 @@ import java.util.List;
 @Repository
 public interface DemandePermissionRepository extends JpaRepository<DemandePermission, Long> {
 
+    @Query("SELECT p FROM DemandePermission p WHERE p.demandeur.id = :employeId AND p.statut = 'APPROUVEE' " +
+            "AND p.type <> 'SORTIE' AND p.dateDebut <= :fin AND p.dateFin >= :debut")
+    List<DemandePermission> findAbsencesApprouvees(@Param("employeId") Long employeId,
+                                                   @Param("debut") java.time.LocalDate debut,
+                                                   @Param("fin") java.time.LocalDate fin);
+
     /**
      * File « À valider » d'un MANAGER/ADMIN (scope entreprise) :
      * demandes orphelines (valideurId null) en attente.

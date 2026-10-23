@@ -4,6 +4,8 @@ import com.example.backend_sirhgp.dto.request.FactureDispatchRequestDTO;
 import com.example.backend_sirhgp.dto.request.FactureRequestDTO;
 import com.example.backend_sirhgp.dto.request.LigneFactureRequestDTO;
 import com.example.backend_sirhgp.dto.response.FactureResponseDTO;
+import com.example.backend_sirhgp.dto.response.PaiementFactureResponseDTO;
+import com.example.backend_sirhgp.dto.request.PaiementFactureRequestDTO;
 import com.example.backend_sirhgp.event.FactureDispatchedEvent;
 import com.example.backend_sirhgp.exception.ResourceNotFoundException;
 import com.example.backend_sirhgp.exception.UnauthorizedException;
@@ -41,6 +43,8 @@ public class FactureService {
     private final FactureMapper factureMapper;
     private final LigneFactureMapper ligneFactureMapper;
     private final ApplicationEventPublisher eventPublisher;
+    private final PaiementFactureRepository paiementFactureRepository;
+    private final FacturePdfService facturePdfService;
 
     // ─── CRUD de base ─────────────────────────────────────────────────────────
 
@@ -49,6 +53,7 @@ public class FactureService {
         Facture facture = factureMapper.toEntity(dto);
         Employer emetteur = getCurrentUser();
         facture.setEmetteur(emetteur);
+        facture.setEntreprise(emetteur.getEntreprise());
 
         if (dto.getProjetId() != null) {
             Projet projet = projetRepository.findById(dto.getProjetId())
@@ -61,19 +66,10 @@ public class FactureService {
                     .orElseThrow(() -> new ResourceNotFoundException("Client non trouvé : " + dto.getClientId()));
             facture.setClient(client);
             facture.setDateEnvoi(LocalDateTime.now());
+            facture.setNomDestinataire(client.getName());
         }
 
-        if (dto.getLignesFacture() != null && !dto.getLignesFacture().isEmpty()) {
-            for (LigneFactureRequestDTO ligneDto : dto.getLignesFacture()) {
-                LigneFacture ligne = ligneFactureMapper.toEntity(ligneDto);
-                if (ligneDto.getTacheId() != null) {
-                    Tache tache = tacheRepository.findById(ligneDto.getTacheId())
-                            .orElseThrow(() -> new ResourceNotFoundException("Tâche non trouvée : " + ligneDto.getTacheId()));
-                    ligne.setTache(tache);
-                }
-                facture.addLigneFacture(ligne);
-            }
-        }
+        appliquerLignes(facture, dto.getLignesFacture());
 
         facture.calculerMontants();
         Facture saved = factureRepository.save(facture);
@@ -108,10 +104,30 @@ public class FactureService {
         Facture facture = factureRepository.findByIdWithRelations(id)
                 .orElseThrow(() -> new ResourceNotFoundException("Facture non trouvée : " + id));
         factureMapper.updateEntity(facture, dto);
+        appliquerLignes(facture, dto.getLignesFacture());
         facture.calculerMontants();
         Facture saved = factureRepository.save(facture);
         updateBudgetProjet(saved);
         return enrich(factureMapper.toResponseDTO(saved), saved);
+    }
+
+    private void appliquerLignes(Facture facture, List<LigneFactureRequestDTO> lignesDto) {
+        if (lignesDto == null) return;
+        facture.getLignesFacture().clear();
+        for (LigneFactureRequestDTO ligneDto : lignesDto) {
+            if (ligneDto == null || ligneDto.getDescription() == null || ligneDto.getDescription().isBlank()
+                    || ligneDto.getQuantite() == null || ligneDto.getQuantite() < 1
+                    || ligneDto.getPrixUnitaire() == null || ligneDto.getPrixUnitaire().signum() < 0) {
+                throw new IllegalArgumentException("Toutes les lignes doivent contenir une désignation, une quantité valide et un prix.");
+            }
+            LigneFacture ligne = ligneFactureMapper.toEntity(ligneDto);
+            if (ligneDto.getTacheId() != null) {
+                Tache tache = tacheRepository.findById(ligneDto.getTacheId())
+                        .orElseThrow(() -> new ResourceNotFoundException("Tâche non trouvée : " + ligneDto.getTacheId()));
+                ligne.setTache(tache);
+            }
+            facture.addLigneFacture(ligne);
+        }
     }
 
     @Transactional
@@ -136,6 +152,54 @@ public class FactureService {
         facture = factureRepository.save(facture);
         updateBudgetProjet(facture);
         return enrich(factureMapper.toResponseDTO(facture), facture);
+    }
+
+    @Transactional
+    public FactureResponseDTO enregistrerPaiement(Long id, PaiementFactureRequestDTO dto) {
+        FactureResponseDTO response = enregistrerPaiement(id, dto.getMontant());
+        Facture facture = factureRepository.findById(id)
+                .orElseThrow(() -> new ResourceNotFoundException("Facture non trouvée : " + id));
+        Employer user = getCurrentUser();
+        PaiementFacture paiement = PaiementFacture.builder()
+                .facture(facture)
+                .datePaiement(dto.getDatePaiement() != null ? dto.getDatePaiement() : LocalDate.now())
+                .mode(dto.getMode())
+                .montant(dto.getMontant())
+                .reference(dto.getReference())
+                .note(dto.getNote())
+                .compteComptable(dto.getMode() != null ? dto.getMode().getCompteComptable() : null)
+                .enregistrePar(user)
+                .build();
+        paiementFactureRepository.save(paiement);
+        return response;
+    }
+
+    @Transactional(readOnly = true)
+    public List<PaiementFactureResponseDTO> getPaiements(Long factureId) {
+        return paiementFactureRepository.findByFactureIdOrderByDatePaiementDesc(factureId).stream().map(p -> {
+            PaiementFactureResponseDTO dto = new PaiementFactureResponseDTO();
+            dto.setId(p.getId());
+            dto.setFactureId(factureId);
+            dto.setMode(p.getMode());
+            dto.setMontant(p.getMontant());
+            dto.setDatePaiement(p.getDatePaiement());
+            dto.setReference(p.getReference());
+            dto.setNote(p.getNote());
+            dto.setCompteComptable(p.getCompteComptable());
+            if (p.getEnregistrePar() != null) {
+                dto.setEnregistreParId(p.getEnregistrePar().getId());
+                dto.setEnregistreParNom(p.getEnregistrePar().getName());
+            }
+            dto.setDateCreation(p.getDateCreation());
+            return dto;
+        }).toList();
+    }
+
+    @Transactional(readOnly = true)
+    public byte[] genererPdf(Long factureId) {
+        Facture facture = factureRepository.findByIdWithRelations(factureId)
+                .orElseThrow(() -> new ResourceNotFoundException("Facture non trouvée : " + factureId));
+        return facturePdfService.generer(facture);
     }
 
     @Transactional

@@ -22,6 +22,16 @@ import java.util.Optional;
 @Repository
 public interface EvenementRepository extends JpaRepository<Evenement, Long> {
 
+    List<Evenement> findBySucursalId(Long sucursalId);
+    List<Evenement> findByEntrepriseId(Long entrepriseId);
+    List<Evenement> findBySucursalIdAndDateDebutBetween(Long sucursalId, LocalDate start, LocalDate end);
+    List<Evenement> findByEntrepriseIdAndDateDebutBetween(Long entrepriseId, LocalDate start, LocalDate end);
+
+    @Query("SELECT DISTINCT e FROM Evenement e JOIN e.participants p WHERE p.id = :participantId AND e.sucursal.id = :sucursalId")
+    List<Evenement> findByParticipantIdAndSucursalId(@Param("participantId") Long participantId, @Param("sucursalId") Long sucursalId);
+
+    List<Evenement> findByProjetIdAndSucursalId(Long projetId, Long sucursalId);
+
     // ─── Filtres simples ──────────────────────────────────────
 
     List<Evenement> findByCreateurId(Long createurId);

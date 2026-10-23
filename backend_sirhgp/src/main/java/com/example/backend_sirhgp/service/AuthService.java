@@ -1,15 +1,18 @@
 package com.example.backend_sirhgp.service;
 
 import com.example.backend_sirhgp.dto.request.AuthRequestDTO;
+import com.example.backend_sirhgp.dto.request.EntrepriseSignupDTO;
 import com.example.backend_sirhgp.dto.request.EmployerCreateDTO;
 import com.example.backend_sirhgp.dto.response.AuthResponseDTO;
 import com.example.backend_sirhgp.dto.response.EmployerResponseDTO;
 import com.example.backend_sirhgp.exception.ResourceNotFoundException;
 import com.example.backend_sirhgp.mapper.EmployerMapper;
 import com.example.backend_sirhgp.model.Employer;
+import com.example.backend_sirhgp.model.Entreprise;
 import com.example.backend_sirhgp.model.Poste;
 import com.example.backend_sirhgp.model.Role;
 import com.example.backend_sirhgp.repository.EmployerRepository;
+import com.example.backend_sirhgp.repository.EntrepriseRepository;
 import com.example.backend_sirhgp.repository.PosteRepository;
 import com.example.backend_sirhgp.repository.RoleRepository;
 import com.example.backend_sirhgp.security.JwtService;
@@ -18,6 +21,7 @@ import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.security.authentication.AuthenticationManager;
 import org.springframework.security.authentication.BadCredentialsException;
+import org.springframework.security.authentication.DisabledException;
 import org.springframework.security.authentication.UsernamePasswordAuthenticationToken;
 import org.springframework.security.core.Authentication;
 import org.springframework.security.core.context.SecurityContextHolder;
@@ -33,6 +37,7 @@ import java.time.LocalDate;
 public class AuthService {
 
     private final EmployerRepository employerRepository;
+    private final EntrepriseRepository entrepriseRepository;
     private final PosteRepository posteRepository;
     private final RoleRepository roleRepository;
     private final PasswordEncoder passwordEncoder;
@@ -83,6 +88,42 @@ public class AuthService {
         return employerMapper.toResponseDTO(employer);
     }
 
+    @Transactional
+    public EmployerResponseDTO registerEntreprise(EntrepriseSignupDTO dto) {
+        String entrepriseName = dto.getEntrepriseNom().trim();
+        String adminEmail = dto.getAdminEmail().trim().toLowerCase();
+
+        if (entrepriseRepository.existsByName(entrepriseName)) {
+            throw new IllegalArgumentException("Cette entreprise existe déjà : " + entrepriseName);
+        }
+        if (employerRepository.existsByEmail(adminEmail)) {
+            throw new IllegalArgumentException("Cet email est déjà utilisé");
+        }
+
+        Role adminRole = roleRepository.findByName("ADMIN")
+                .orElseThrow(() -> new ResourceNotFoundException("Rôle ADMIN introuvable"));
+        Entreprise entreprise = entrepriseRepository.save(Entreprise.builder()
+                .name(entrepriseName)
+                .secteurActivite(dto.getSecteurActivite())
+                .type(dto.getType() != null ? dto.getType() : Entreprise.TypeEntreprise.AUTRE)
+                .ville(dto.getVille())
+                .telephone(dto.getTelephone())
+                .statut(Entreprise.StatutEntreprise.ACTIVE)
+                .build());
+
+        Employer admin = Employer.builder()
+                .name(dto.getAdminNom().trim())
+                .email(adminEmail)
+                .motDePasse(passwordEncoder.encode(dto.getMotDePasse()))
+                .dateEmbauche(LocalDate.now())
+                .actif(true)
+                .role(adminRole)
+                .entreprise(entreprise)
+                .build();
+
+        return employerMapper.toResponseDTO(employerRepository.save(admin));
+    }
+
     public AuthResponseDTO authenticate(AuthRequestDTO request) {
         String email = request.getEmail().trim().toLowerCase();
         log.info("Tentative de connexion pour : {}", email);
@@ -101,7 +142,11 @@ public class AuthService {
                 .orElseThrow(() -> new ResourceNotFoundException("Employé non trouvé"));
 
         if (!employer.isActif()) {
-            throw new IllegalArgumentException("Ce compte est désactivé. Contactez l'administrateur.");
+            throw new DisabledException("Compte désactivé");
+        }
+        if (employer.getRole() == null || employer.getRole().getName() == null
+                || employer.getRole().getName().isBlank()) {
+            throw new DisabledException("Aucun rôle n'est attribué à ce compte");
         }
 
         String token = jwtService.generateToken(employer);

@@ -11,9 +11,11 @@ import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
+import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.web.bind.annotation.*;
 
 import java.util.List;
+import java.util.Map;
 
 /**
  * CORRECTIONS :
@@ -40,6 +42,11 @@ public class TacheController {
         return ResponseEntity.ok(
                 new ApiResponse<>(true, "Tâches récupérées avec succès",
                         tacheService.findAll(pageable)));
+    }
+
+    @GetMapping("/mon-etat")
+    public ResponseEntity<ApiResponse<Map<String, Object>>> monEtat() {
+        return ResponseEntity.ok(new ApiResponse<>(true, "État courant", tacheService.getMonEtat()));
     }
 
     @GetMapping("/{id}")
@@ -84,6 +91,7 @@ public class TacheController {
     }
 
     @DeleteMapping("/{id}")
+    @PreAuthorize("hasAnyRole('SUPER_ADMIN','ADMIN','MANAGER','LEAD','STAFF','STAGIAIRE')")
     public ResponseEntity<ApiResponse<Void>> delete(@PathVariable Long id) {
         tacheService.delete(id);
         return ResponseEntity.ok(

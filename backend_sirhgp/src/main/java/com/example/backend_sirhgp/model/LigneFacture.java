@@ -46,6 +46,10 @@ public class LigneFacture {
     @Builder.Default
     private BigDecimal montantTotal = BigDecimal.ZERO;
 
+    @Column(precision = 15, scale = 2)
+    @Builder.Default
+    private BigDecimal montantTVA = BigDecimal.ZERO;
+
     @ManyToOne(fetch = FetchType.LAZY)
     @JoinColumn(name = "facture_id", nullable = false)
     private Facture facture;

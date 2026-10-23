@@ -21,6 +21,8 @@ public class ProjetResponseDTO {
     private String nom;
     private String description;
     private String codeProjet;
+    private Long entrepriseId;
+    private Long sucursalId;
     private Projet.StatutProjet statut;
     private LocalDate dateDebut;
     private LocalDate dateFinPrevue;

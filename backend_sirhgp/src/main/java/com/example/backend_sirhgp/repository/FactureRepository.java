@@ -15,6 +15,12 @@ import java.util.Optional;
 @Repository
 public interface FactureRepository extends JpaRepository<Facture, Long> {
 
+    @Query("SELECT f.entreprise.id, COUNT(f) FROM Facture f WHERE f.entreprise IS NOT NULL GROUP BY f.entreprise.id")
+    List<Object[]> countGroupedByEntreprise();
+
+    @Query("SELECT f.entreprise.id, COALESCE(SUM(f.montantTTC),0) FROM Facture f WHERE f.entreprise IS NOT NULL GROUP BY f.entreprise.id")
+    List<Object[]> sumMontantTTCGroupedByEntreprise();
+
     Optional<Facture> findByNumeroFacture(String numeroFacture);
     boolean existsByNumeroFacture(String numeroFacture);
 

@@ -18,6 +18,9 @@ public interface RoleRepository extends JpaRepository<Role, Long> {
 
     Optional<Role> findByName(String name);
 
+    @Query("SELECT r FROM Role r WHERE r.name <> 'SUPER_ADMIN' ORDER BY r.id")
+    List<Role> findAllForFilters();
+
     @Query("SELECT r FROM Role r LEFT JOIN FETCH r.permissions WHERE r.name = :name")
     Optional<Role> findByNameWithPermissions(@Param("name") String name);
 

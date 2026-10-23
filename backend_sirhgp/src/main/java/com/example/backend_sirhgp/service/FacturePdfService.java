@@ -126,7 +126,6 @@ public class FacturePdfService {
         }
 
         List<LigneFacture> lignes = new ArrayList<>(f.getLignesFacture());
-        lignes.sort(Comparator.comparing(LigneFacture::getId, Comparator.nullsLast(Comparator.naturalOrder())));
 
         Font fb = FontFactory.getFont(FontFactory.HELVETICA, 9);
         if (lignes.isEmpty()) {

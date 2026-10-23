@@ -24,6 +24,19 @@ public interface DepartementRepository extends JpaRepository<Departement, Long> 
 
     Optional<Departement> findByName(String name);
 
+    List<Departement> findBySuperviseurId(Long superviseurId);
+
+    @Query("SELECT d.id FROM Departement d WHERE d.superviseur.id = :superviseurId")
+    List<Long> findIdsBySuperviseurId(@Param("superviseurId") Long superviseurId);
+
+    @Query("SELECT DISTINCT d.id FROM Departement d WHERE d.superviseur.entreprise.id = :entrepriseId " +
+            "OR d.id IN (SELECT e.poste.departement.id FROM Employer e WHERE e.entreprise.id = :entrepriseId AND e.poste.departement IS NOT NULL)")
+    List<Long> findIdsByEntrepriseId(@Param("entrepriseId") Long entrepriseId);
+
+    @Query("SELECT DISTINCT d.id FROM Departement d WHERE (d.superviseur.sucursal.id = :sucursalId AND d.superviseur.entreprise.id = :entrepriseId) " +
+            "OR d.id IN (SELECT e.poste.departement.id FROM Employer e WHERE e.sucursal.id = :sucursalId AND e.entreprise.id = :entrepriseId AND e.poste.departement IS NOT NULL)")
+    List<Long> findIdsBySucursalId(@Param("sucursalId") Long sucursalId, @Param("entrepriseId") Long entrepriseId);
+
     /**
      * Charge un département avec ses postes en un seul SELECT.
      */

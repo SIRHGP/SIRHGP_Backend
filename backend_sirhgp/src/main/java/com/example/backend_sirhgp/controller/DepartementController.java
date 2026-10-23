@@ -31,6 +31,7 @@ public class DepartementController {
     }
 
     @GetMapping
+    @PreAuthorize("hasAnyRole('SUPER_ADMIN', 'ADMIN', 'MANAGER', 'LEAD')")
     public ResponseEntity<ApiResponse<Page<DepartementResponseDTO>>> getAll(Pageable pageable) {
         return ResponseEntity.ok(
                 new ApiResponse<>(true, "Départements récupérés avec succès",
@@ -38,6 +39,7 @@ public class DepartementController {
     }
 
     @GetMapping("/{id}")
+    @PreAuthorize("hasAnyRole('SUPER_ADMIN', 'ADMIN', 'MANAGER', 'LEAD')")
     public ResponseEntity<ApiResponse<DepartementResponseDTO>> getById(@PathVariable Long id) {
         return ResponseEntity.ok(
                 new ApiResponse<>(true, "Département récupéré avec succès",

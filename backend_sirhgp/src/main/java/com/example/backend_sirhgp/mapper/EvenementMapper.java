@@ -25,6 +25,9 @@ public interface EvenementMapper {
     @Mapping(source = "projet.id", target = "projet.id")
     @Mapping(source = "projet.nom", target = "projet.nom")
     @Mapping(source = "projet.codeProjet", target = "projet.codeProjet")
+    @Mapping(source = "entreprise.id", target = "entrepriseId")
+    @Mapping(source = "sucursal.id", target = "sucursalId")
+    @Mapping(source = "sucursal.name", target = "sucursalNom")
     @Mapping(target = "participants", expression = "java(mapParticipantsToSummary(evenement.getParticipants()))")
     @Mapping(target = "nombreParticipants", ignore = true)
     @Mapping(target = "estPasse", ignore = true)
@@ -39,6 +42,8 @@ public interface EvenementMapper {
     @Mapping(target = "projet", ignore = true)
     @Mapping(target = "dateCreation", ignore = true)
     @Mapping(target = "dateModification", ignore = true)
+    @Mapping(target = "entreprise", ignore = true)
+    @Mapping(target = "sucursal", ignore = true)
     Evenement toEntity(EvenementRequestDTO dto);
 
     @Mapping(target = "id", ignore = true)
@@ -47,6 +52,8 @@ public interface EvenementMapper {
     @Mapping(target = "projet", ignore = true)
     @Mapping(target = "dateCreation", ignore = true)
     @Mapping(target = "dateModification", ignore = true)
+    @Mapping(target = "entreprise", ignore = true)
+    @Mapping(target = "sucursal", ignore = true)
     void updateEntity(@MappingTarget Evenement entity, EvenementRequestDTO dto);
 
     default Set<EvenementResponseDTO.EmployerSummaryDTO> mapParticipantsToSummary(Set<Employer> participants) {

@@ -366,6 +366,15 @@ public class FacturationCycleService {
         if (dto.getLignesFacture() == null || dto.getLignesFacture().isEmpty()) {
             throw new IllegalArgumentException("Au moins une ligne de saisie est obligatoire");
         }
+        for (int i = 0; i < dto.getLignesFacture().size(); i++) {
+            var ligne = dto.getLignesFacture().get(i);
+            if (ligne == null || ligne.getDescription() == null || ligne.getDescription().isBlank()
+                    || ligne.getQuantite() == null || ligne.getQuantite() < 1
+                    || ligne.getPrixUnitaire() == null || ligne.getPrixUnitaire().signum() < 0) {
+                throw new IllegalArgumentException("La ligne " + (i + 1)
+                        + " est incomplète : renseignez une désignation, une quantité valide et un prix.");
+            }
+        }
     }
 
     /** Conversion des champs de saisie du cycle vers le DTO facture générique (OHADA). */
@@ -423,7 +432,7 @@ public class FacturationCycleService {
         dto.setEtape2Faite(e2);
         dto.setEtape3Faite(e3);
         dto.setEtapeCourante(c.etapeCourante());
-        dto.setAvancementPct(c.isCloture() ? 100 : e3 ? 67 : e2 ? 34 : 0);
+        dto.setAvancementPct(e3 ? 100 : e2 ? 67 : e1 ? 33 : 0);
         dto.setCloturee(c.isCloture());
 
         // Étape 1 — pièce proforma
@@ -477,6 +486,20 @@ public class FacturationCycleService {
         r.setMontantPaye(f.getMontantPaye());
         r.setMontantRestant(f.getMontantRestant());
         r.setPdfDisponible(true);
+        r.setLignesFacture(f.getLignesFacture().stream().map(l -> {
+            var ligne = new com.example.backend_sirhgp.dto.response.LigneFactureResponseDTO();
+            ligne.setId(l.getId());
+            ligne.setDescription(l.getDescription());
+            ligne.setQuantite(l.getQuantite());
+            ligne.setPrixUnitaire(l.getPrixUnitaire());
+            ligne.setMontantTotal(l.getMontantTotal());
+            ligne.setFactureId(f.getId());
+            if (l.getTache() != null) {
+                ligne.setTacheId(l.getTache().getId());
+                ligne.setTacheNom(l.getTache().getTitre());
+            }
+            return ligne;
+        }).toList());
         return r;
     }
 }

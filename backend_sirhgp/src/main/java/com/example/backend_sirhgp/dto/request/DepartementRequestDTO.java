@@ -12,4 +12,6 @@ public class DepartementRequestDTO {
     private String name;
 
     private Set<Long> projetIds;
+
+    private Long superviseurId;
 }

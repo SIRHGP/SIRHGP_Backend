@@ -49,6 +49,8 @@ public interface FactureMapper {
     @Mapping(target = "dateConsultation", ignore = true)
     @Mapping(target = "dateEnvoi", ignore = true)
     @Mapping(target = "message", ignore = true)
+    @Mapping(target = "nomDestinataire", ignore = true)
+    @Mapping(target = "entreprise", ignore = true)
     Facture toEntity(FactureRequestDTO dto);
 
     @Mapping(target = "id", ignore = true)
@@ -67,5 +69,7 @@ public interface FactureMapper {
     @Mapping(target = "dateConsultation", ignore = true)
     @Mapping(target = "dateEnvoi", ignore = true)
     @Mapping(target = "message", ignore = true)
+    @Mapping(target = "nomDestinataire", ignore = true)
+    @Mapping(target = "entreprise", ignore = true)
     void updateEntity(@MappingTarget Facture entity, FactureRequestDTO dto);
 }

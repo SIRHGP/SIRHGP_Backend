@@ -28,6 +28,9 @@ public interface EmployerRepository extends JpaRepository<Employer, Long> {
             "LEFT JOIN FETCH p.role pr " +
             "LEFT JOIN FETCH p.departement " +  // ← LIGNE AJOUTÉE
             "LEFT JOIN FETCH p.permissions pp " +
+            "LEFT JOIN FETCH e.entreprise " +
+            "LEFT JOIN FETCH e.sucursal " +
+            "LEFT JOIN FETCH e.manager " +
             "WHERE e.email = :email")
     Optional<Employer> findByEmailWithFullContext(@Param("email") String email);
 
@@ -36,6 +39,9 @@ public interface EmployerRepository extends JpaRepository<Employer, Long> {
             "LEFT JOIN FETCH e.poste p " +
             "LEFT JOIN FETCH p.role " +
             "LEFT JOIN FETCH p.departement " +
+            "LEFT JOIN FETCH e.entreprise " +
+            "LEFT JOIN FETCH e.sucursal " +
+            "LEFT JOIN FETCH e.manager " +
             "WHERE e.email = :email")
     Optional<Employer> findByEmailWithRolesAndPoste(@Param("email") String email);
 
@@ -43,17 +49,54 @@ public interface EmployerRepository extends JpaRepository<Employer, Long> {
             "LEFT JOIN FETCH e.role " +
             "LEFT JOIN FETCH e.poste p " +
             "LEFT JOIN FETCH p.departement " +
+            "LEFT JOIN FETCH e.entreprise " +
+            "LEFT JOIN FETCH e.sucursal " +
+            "LEFT JOIN FETCH e.manager " +
             "WHERE e.id = :id")
     Optional<Employer> findByIdWithDetails(@Param("id") Long id);
 
     List<Employer> findByActifTrue();
     List<Employer> findByPosteId(Long posteId);
     List<Employer> findByRoleId(Long roleId);
+    List<Employer> findByEntrepriseId(Long entrepriseId);
+    List<Employer> findBySucursalIdAndActifTrueOrderByNameAsc(Long sucursalId);
+    long countBySucursalId(Long sucursalId);
+
+    @Query("SELECT COUNT(e) FROM Employer e WHERE e.sucursal.id = :sucursalId AND e.actif = true AND UPPER(e.role.name) = 'SECRETAIRE' AND (:employerId IS NULL OR e.id <> :employerId)")
+    long countOtherActiveSecretaries(@Param("sucursalId") Long sucursalId, @Param("employerId") Long employerId);
+
+    @Query("SELECT e.entreprise.id, COUNT(e) FROM Employer e WHERE e.entreprise IS NOT NULL GROUP BY e.entreprise.id")
+    List<Object[]> countGroupedByEntreprise();
+
+    @Query("SELECT e FROM Employer e WHERE e.actif = true AND UPPER(e.role.name) = 'MANAGER' AND e.entreprise.id = :entrepriseId")
+    List<Employer> findManagersActifsByEntrepriseId(@Param("entrepriseId") Long entrepriseId);
+
+    @Query("SELECT e FROM Employer e WHERE e.actif = true AND UPPER(e.role.name) = 'MANAGER'")
+    List<Employer> findAllManagersActifs();
+
+    @Query("SELECT e FROM Employer e WHERE UPPER(e.role.name) = 'ADMIN' AND e.entreprise.id = :entrepriseId")
+    List<Employer> findAdminsByEntrepriseId(@Param("entrepriseId") Long entrepriseId);
+
+    @Query("SELECT e.poste.departement.id FROM Employer e WHERE e.id = :employerId")
+    Optional<Long> findDepartementIdOfPoste(@Param("employerId") Long employerId);
+
+    @Query("SELECT e.id FROM Employer e WHERE e.poste.departement.id IN :departementIds")
+    List<Long> findIdsByDepartementIdIn(@Param("departementIds") List<Long> departementIds);
 
     long countByPosteId(Long posteId);
     long countByRoleId(Long roleId);
 
+    long countByEntrepriseId(Long entrepriseId);
+
+    @Query("SELECT COUNT(e) FROM Employer e WHERE e.entreprise.id = :entrepriseId AND e.actif = true AND UPPER(e.role.name) = 'ADMIN'")
+    long countActiveAdminsByEntrepriseId(@Param("entrepriseId") Long entrepriseId);
+
     @Query("SELECT COUNT(e) FROM Employer e " +
             "WHERE e.poste.departement.id = :departementId AND e.actif = true")
     long countActifsByDepartementId(@Param("departementId") Long departementId);
+
+    @Query("SELECT COUNT(e) FROM Employer e " +
+            "WHERE e.poste.departement.id = :departementId AND e.entreprise.id = :entrepriseId AND e.actif = true")
+    long countActifsByDepartementIdAndEntrepriseId(@Param("departementId") Long departementId,
+                                                   @Param("entrepriseId") Long entrepriseId);
 }

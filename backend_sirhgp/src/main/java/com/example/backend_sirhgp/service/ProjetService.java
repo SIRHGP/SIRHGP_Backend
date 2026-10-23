@@ -33,6 +33,8 @@ public class ProjetService {
     private final TacheRepository tacheRepository;
     private final FactureRepository factureRepository;
     private final ProjetMapper projetMapper;
+    private final EntrepriseContextService entrepriseContextService;
+    private final SucursalRepository sucursalRepository;
 
     @Transactional
     public ProjetResponseDTO create(ProjetRequestDTO dto) {
@@ -47,6 +49,7 @@ public class ProjetService {
             throw new IllegalArgumentException("Code projet déjà utilisé : " + projet.getCodeProjet());
         }
         resolveRelations(projet, dto);
+        appliquerScopeCreation(projet, dto);
         projet.updateBudget();
         Projet saved = projetRepository.save(projet);
         log.info("Projet créé : {} ({})", saved.getNom(), saved.getCodeProjet());
@@ -55,13 +58,22 @@ public class ProjetService {
 
     @Transactional(readOnly = true)
     public Page<ProjetResponseDTO> findAll(Pageable pageable) {
-        return projetRepository.findAll(pageable).map(this::enrichAndMap);
+        Long sucursalId = entrepriseContextService.getScopeSucursalId();
+        Long entrepriseId = entrepriseContextService.getScopeEntrepriseId();
+        List<Projet> scoped = sucursalId != null ? projetRepository.findBySucursalId(sucursalId)
+                : entrepriseId != null ? projetRepository.findByEntrepriseId(entrepriseId) : projetRepository.findAll();
+        List<ProjetResponseDTO> dtos = scoped.stream().map(this::enrichAndMap).toList();
+        if (pageable.isUnpaged()) return new org.springframework.data.domain.PageImpl<>(dtos);
+        int from = Math.min((int) pageable.getOffset(), dtos.size());
+        int to = Math.min(from + pageable.getPageSize(), dtos.size());
+        return new org.springframework.data.domain.PageImpl<>(dtos.subList(from, to), pageable, dtos.size());
     }
 
     @Transactional(readOnly = true)
     public ProjetResponseDTO findById(Long id) {
         Projet projet = projetRepository.findByIdWithMembres(id)
                 .orElseThrow(() -> new ResourceNotFoundException("Projet non trouvé : " + id));
+        verifierLectureScope(projet);
         return enrichAndMap(projet);
     }
 
@@ -70,13 +82,50 @@ public class ProjetService {
         Projet projet = projetRepository.findByIdWithMembres(id)
                 .orElseThrow(() -> new ResourceNotFoundException("Projet non trouvé : " + id));
         projetMapper.updateEntity(projet, dto);
+        verifierLectureScope(projet);
         resolveRelations(projet, dto);
+        appliquerScopeModification(projet, dto);
         if (projet.getStatut() == Projet.StatutProjet.TERMINE && projet.getDateFinReelle() == null) {
             projet.setDateFinReelle(LocalDate.now());
         }
         projet.updateBudget();
         projet.verifierEtMettreAJourRetard();
         return enrichAndMap(projetRepository.save(projet));
+    }
+
+    private void verifierLectureScope(Projet projet) {
+        Long sucursalId = entrepriseContextService.getScopeSucursalId();
+        Long entrepriseId = entrepriseContextService.getScopeEntrepriseId();
+        if ((sucursalId != null && (projet.getSucursal() == null || !sucursalId.equals(projet.getSucursal().getId())))
+                || (entrepriseId != null && (projet.getEntreprise() == null || !entrepriseId.equals(projet.getEntreprise().getId()))))
+            throw new ResourceNotFoundException("Projet non trouvé");
+    }
+
+    private void appliquerScopeCreation(Projet projet, ProjetRequestDTO dto) {
+        Employer current = entrepriseContextService.getCurrentEmployer();
+        Entreprise entreprise = entrepriseContextService.getEntrepriseOfCurrentUser();
+        if (entreprise != null) projet.setEntreprise(entreprise);
+        Long sucId = dto.getSucursalId() != null ? dto.getSucursalId() : entrepriseContextService.getScopeSucursalId();
+        if (sucId != null) {
+            Sucursal suc = sucursalRepository.findById(sucId)
+                    .orElseThrow(() -> new ResourceNotFoundException("Succursale non trouvée : " + sucId));
+            if (entreprise != null && (suc.getEntreprise() == null || !entreprise.getId().equals(suc.getEntreprise().getId())))
+                throw new org.springframework.security.access.AccessDeniedException("Succursale hors de votre entreprise.");
+            if (current != null && current.getSucursal() != null && !current.getSucursal().getId().equals(suc.getId()))
+                throw new org.springframework.security.access.AccessDeniedException("Vous ne pouvez utiliser que votre succursale.");
+            projet.setSucursal(suc);
+        }
+    }
+
+    private void appliquerScopeModification(Projet projet, ProjetRequestDTO dto) {
+        if (dto.getSucursalId() == null) return;
+        Long scope = entrepriseContextService.getScopeSucursalId();
+        if (scope != null && !scope.equals(dto.getSucursalId()))
+            throw new org.springframework.security.access.AccessDeniedException("Vous ne pouvez déplacer ce projet hors de votre succursale.");
+        Sucursal suc = sucursalRepository.findById(dto.getSucursalId())
+                .orElseThrow(() -> new ResourceNotFoundException("Succursale non trouvée : " + dto.getSucursalId()));
+        projet.setSucursal(suc);
+        projet.setEntreprise(suc.getEntreprise());
     }
 
     @Transactional
@@ -142,6 +191,7 @@ public class ProjetService {
     // CORRECTION : méthode manquante appelée depuis ProjetController
     public List<ProjetResponseDTO> findByDepartement(Long departementId) {
         return projetRepository.findByDepartementId(departementId).stream()
+                .filter(this::dansScope)
                 .map(this::enrichAndMap)
                 .collect(Collectors.toList());
     }
@@ -150,7 +200,14 @@ public class ProjetService {
     public List<ProjetResponseDTO> findProjetsEnRetard() {
         return projetRepository.findByDateFinPrevueBeforeAndStatutNot(
                         LocalDate.now(), Projet.StatutProjet.TERMINE)
-                .stream().map(this::enrichAndMap).collect(Collectors.toList());
+                .stream().filter(this::dansScope).map(this::enrichAndMap).collect(Collectors.toList());
+    }
+
+    private boolean dansScope(Projet projet) {
+        Long suc = entrepriseContextService.getScopeSucursalId();
+        Long ent = entrepriseContextService.getScopeEntrepriseId();
+        return (suc == null || (projet.getSucursal() != null && suc.equals(projet.getSucursal().getId())))
+                && (ent == null || (projet.getEntreprise() != null && ent.equals(projet.getEntreprise().getId())));
     }
 
     // ─── Dashboard ────────────────────────────────────────────
@@ -249,14 +306,32 @@ public class ProjetService {
 
     private ProjetResponseDTO enrichAndMap(Projet projet) {
         ProjetResponseDTO dto = projetMapper.toResponseDTO(projet);
+        Employer current = entrepriseContextService.getCurrentEmployer();
+        boolean secretary = current != null && current.getRole() != null
+                && "SECRETAIRE".equals(current.getRole().getName());
         Long id = projet.getId();
         dto.setNombreTaches(tacheRepository.countByProjetId(id));
         dto.setNombreTachesTerminees(tacheRepository.countByProjetIdAndStatut(id, Tache.StatutTache.TERMINEE));
         dto.setNombreTachesEnCours(tacheRepository.countByProjetIdAndStatut(id, Tache.StatutTache.EN_COURS));
         dto.setNombreTachesEnRetard(tacheRepository.countTachesEnRetardByProjetId(id, LocalDate.now(), Tache.StatutTache.TERMINEE));
-        dto.setNombreFactures(factureRepository.countByProjetId(id));
-        dto.setMontantTotalFactures(factureRepository.sumMontantTTCByProjetId(id));
-        dto.setMontantPayeFactures(factureRepository.sumMontantPayeByProjetId(id));
+        if (secretary) {
+            // The secretary may read project operations, but project DTOs must not
+            // become a side door to invoice totals or financial reporting.
+            dto.setBudgetAlloue(null);
+            dto.setBudgetConsomme(null);
+            dto.setBudgetRestant(null);
+            dto.setNombreFactures(null);
+            dto.setNombreFacturesPayees(null);
+            dto.setNombreFacturesEnAttente(null);
+            dto.setMontantTotalFactures(null);
+            dto.setMontantPayeFactures(null);
+            dto.setMontantRestantFactures(null);
+            dto.setDepassementBudget(null);
+        } else {
+            dto.setNombreFactures(factureRepository.countByProjetId(id));
+            dto.setMontantTotalFactures(factureRepository.sumMontantTTCByProjetId(id));
+            dto.setMontantPayeFactures(factureRepository.sumMontantPayeByProjetId(id));
+        }
         dto.setNombreMembres((long) projet.getMembres().size());
         dto.setNombreDepartements((long) projet.getDepartements().size());
         if (projet.getDateFinPrevue() != null) {

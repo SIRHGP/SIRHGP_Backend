@@ -1,4 +1,4 @@
-package com.example.backend_sirhgp.dto.dashboard;
+package com.example.backend_sirhgp.dto.response;
 
 
 import com.example.backend_sirhgp.model.Projet;

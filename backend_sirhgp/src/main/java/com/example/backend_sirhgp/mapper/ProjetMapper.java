@@ -24,6 +24,8 @@ public interface ProjetMapper {
     @Mapping(target = "chefProjet",    expression = "java(mapToEmployerSummary(projet.getChefProjet()))")
     @Mapping(target = "membres",       expression = "java(mapMembres(projet.getMembres()))")
     @Mapping(target = "departements",  expression = "java(mapDepartements(projet.getDepartements()))")
+    @Mapping(source = "entreprise.id", target = "entrepriseId")
+    @Mapping(source = "sucursal.id", target = "sucursalId")
     @Mapping(target = "nombreTaches",            ignore = true)
     @Mapping(target = "nombreTachesTerminees",   ignore = true)
     @Mapping(target = "nombreTachesEnCours",     ignore = true)
@@ -57,6 +59,8 @@ public interface ProjetMapper {
     @Mapping(target = "progression",      ignore = true)
     @Mapping(target = "dateCreation",     ignore = true)
     @Mapping(target = "dateModification", ignore = true)
+    @Mapping(target = "entreprise",       ignore = true)
+    @Mapping(target = "sucursal",         ignore = true)
     Projet toEntity(ProjetRequestDTO dto);
 
     @Mapping(target = "id",               ignore = true)
@@ -72,6 +76,8 @@ public interface ProjetMapper {
     @Mapping(target = "progression",      ignore = true)
     @Mapping(target = "dateCreation",     ignore = true)
     @Mapping(target = "dateModification", ignore = true)
+    @Mapping(target = "entreprise",       ignore = true)
+    @Mapping(target = "sucursal",         ignore = true)
     void updateEntity(@MappingTarget Projet entity, ProjetRequestDTO dto);
 
     default ProjetResponseDTO.EmployerSummaryDTO mapToEmployerSummary(Employer employer) {

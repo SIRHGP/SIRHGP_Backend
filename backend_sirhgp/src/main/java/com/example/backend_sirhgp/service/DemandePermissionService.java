@@ -221,6 +221,7 @@ public class DemandePermissionService {
         Long entrepriseId = demandeur.getEntreprise() != null ? demandeur.getEntreprise().getId() : null;
 
         Employer candidat = switch (role == null ? "" : role) {
+            case "SECRETAIRE" -> managerDeSucursal(demandeur);
             case "STAFF", "STAGIAIRE" -> superviseurDeDepartement(demandeur);
             case "LEAD" -> premierActif(entrepriseId != null
                     ? employerRepository.findManagersActifsByEntrepriseId(entrepriseId)
@@ -241,6 +242,17 @@ public class DemandePermissionService {
         // Ultime garde-fou : jamais auto-validation
         if (candidat != null && candidat.getId().equals(demandeur.getId())) return null;
         return candidat;
+    }
+
+    private Employer managerDeSucursal(Employer demandeur) {
+        if (demandeur.getSucursal() == null || demandeur.getSucursal().getManager() == null) return null;
+        Employer manager = employerRepository.findByIdWithDetails(demandeur.getSucursal().getManager().getId()).orElse(null);
+        if (manager == null || !manager.isActif() || manager.getRole() == null
+                || !"MANAGER".equals(manager.getRole().getName())) return null;
+        if (manager.getEntreprise() == null || demandeur.getEntreprise() == null
+                || !manager.getEntreprise().getId().equals(demandeur.getEntreprise().getId())) return null;
+        if (manager.getSucursal() == null || !manager.getSucursal().getId().equals(demandeur.getSucursal().getId())) return null;
+        return manager;
     }
 
     /**

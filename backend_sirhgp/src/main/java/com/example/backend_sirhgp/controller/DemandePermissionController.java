@@ -8,6 +8,7 @@ import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
+import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.web.bind.annotation.*;
 
 import java.util.List;
@@ -28,6 +29,7 @@ public class DemandePermissionController {
     private final DemandePermissionService service;
 
     @PostMapping
+    @PreAuthorize("hasAnyRole('STAFF','STAGIAIRE','LEAD','MANAGER','ADMIN','SECRETAIRE')")
     public ResponseEntity<ApiResponse<DemandePermissionResponseDTO>> create(
             @Valid @RequestBody DemandePermissionRequestDTO dto) {
         return ResponseEntity.status(HttpStatus.CREATED)
@@ -35,16 +37,19 @@ public class DemandePermissionController {
     }
 
     @GetMapping("/mes")
+    @PreAuthorize("hasAnyRole('STAFF','STAGIAIRE','LEAD','MANAGER','ADMIN','SECRETAIRE')")
     public ResponseEntity<ApiResponse<List<DemandePermissionResponseDTO>>> mesDemandes() {
         return ResponseEntity.ok(new ApiResponse<>(true, "Mes demandes récupérées", service.mesDemandes()));
     }
 
     @GetMapping("/a-valider")
+    @PreAuthorize("hasAnyRole('LEAD','MANAGER','ADMIN','SUPER_ADMIN')")
     public ResponseEntity<ApiResponse<List<DemandePermissionResponseDTO>>> aValider() {
         return ResponseEntity.ok(new ApiResponse<>(true, "Demandes à valider récupérées", service.aValider()));
     }
 
     @PatchMapping("/{id}/decision")
+    @PreAuthorize("hasAnyRole('LEAD','MANAGER','ADMIN','SUPER_ADMIN')")
     public ResponseEntity<ApiResponse<DemandePermissionResponseDTO>> decider(
             @PathVariable Long id,
             @RequestParam String statut,
@@ -54,6 +59,7 @@ public class DemandePermissionController {
     }
 
     @PatchMapping("/{id}/annuler")
+    @PreAuthorize("hasAnyRole('STAFF','STAGIAIRE','LEAD','MANAGER','ADMIN','SECRETAIRE')")
     public ResponseEntity<ApiResponse<DemandePermissionResponseDTO>> annuler(@PathVariable Long id) {
         return ResponseEntity.ok(new ApiResponse<>(true, "Demande annulée", service.annuler(id)));
     }

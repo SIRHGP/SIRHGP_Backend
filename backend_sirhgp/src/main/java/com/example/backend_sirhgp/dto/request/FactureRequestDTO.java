@@ -6,7 +6,7 @@ import jakarta.validation.constraints.*;
 import lombok.Data;
 import java.math.BigDecimal;
 import java.time.LocalDate;
-import java.util.Set;
+import java.util.List;
 
 @Data
 public class FactureRequestDTO {
@@ -40,6 +40,13 @@ public class FactureRequestDTO {
     // Client (destinataire) - optionnel lors de la création, sera défini lors du dispatch
     private Long clientId;
 
+    private String module;
+    private BigDecimal tauxTVA;
+    private Boolean assujettiTVA;
+    private Facture.SensFacture sens;
+    private String nomFournisseur;
+    private Long factureOrigineId;
+
     @Valid
-    private Set<LigneFactureRequestDTO> lignesFacture;
+    private List<LigneFactureRequestDTO> lignesFacture;
 }

@@ -101,7 +101,7 @@ public class Document {
     private Projet projet;
 
     public enum TypeDocument {
-        CONTRAT, RAPPORT, FACTURE, PRESENTATION, IMAGE, AUTRE
+        CONTRAT, RAPPORT, FACTURE, PRESENTATION, IMAGE, CV, AUTRE
     }
 
     public enum DocumentStatus {

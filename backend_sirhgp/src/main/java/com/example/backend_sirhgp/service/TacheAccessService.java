@@ -16,6 +16,10 @@ public class TacheAccessService {
         Long entrepriseId = tache.getEntreprise() == null ? null : tache.getEntreprise().getId();
         Long userEntrepriseId = user.getEntreprise() == null ? null : user.getEntreprise().getId();
         if (!superAdmin && !Objects.equals(entrepriseId, userEntrepriseId)) return false;
+        if (user.getSucursal() != null) {
+            Long taskSucursalId = tache.getSucursal() == null ? null : tache.getSucursal().getId();
+            if (!Objects.equals(taskSucursalId, user.getSucursal().getId())) return false;
+        }
         return tache.getVisibilite() != Tache.Visibilite.PRIVEE
                 || (tache.getCreateur() != null && user.getId().equals(tache.getCreateur().getId()))
                 || (tache.getAssignee() != null && user.getId().equals(tache.getAssignee().getId()));
