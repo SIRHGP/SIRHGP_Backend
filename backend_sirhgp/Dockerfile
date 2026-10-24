@@ -1,12 +1,22 @@
-FROM maven:3.9.12-eclipse-temurin-17 AS build
+FROM maven:3.9.12-eclipse-temurin-21 AS build
 
 WORKDIR /workspace
 COPY pom.xml .
-RUN mvn -B -DskipTests dependency:go-offline
+RUN --mount=type=cache,target=/root/.m2 \
+    for attempt in 1 2 3; do \
+      mvn -B -Dmaven.wagon.http.retryHandler.count=5 -DskipTests dependency:go-offline && exit 0; \
+      if [ "$attempt" -eq 3 ]; then exit 1; fi; \
+      sleep 2; \
+    done
 COPY src ./src
-RUN mvn -B -DskipTests package
+RUN --mount=type=cache,target=/root/.m2 \
+    for attempt in 1 2 3; do \
+      mvn -B -Dmaven.wagon.http.retryHandler.count=5 -DskipTests package && exit 0; \
+      if [ "$attempt" -eq 3 ]; then exit 1; fi; \
+      sleep 2; \
+    done
 
-FROM eclipse-temurin:17-jre-jammy
+FROM eclipse-temurin:21-jre-jammy
 
 RUN apt-get update \
     && apt-get install -y --no-install-recommends curl \
