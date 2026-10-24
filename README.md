@@ -2,6 +2,21 @@
 
 API REST Spring Boot, Java 17+, MySQL 8.
 
+## Deploiement de l'API sur Render
+
+Le Blueprint `render.yaml` configure l'API comme service Docker gratuit, avec le profil `prod` et le controle de sante `/actuator/health`. Le depot backend doit etre connecte a Render. A la creation du Blueprint, renseigne les variables demandees :
+
+- `DB_URL` : URL JDBC de la base MySQL de production, avec TLS active si le fournisseur l'exige (par exemple `jdbc:mysql://hote:port/sirhgp_db?sslMode=REQUIRED&serverTimezone=UTC`).
+- `DB_USERNAME` et `DB_PASSWORD` : identifiants dedies a l'application, pas le compte root.
+- `CORS_ORIGINS` : origine exacte du frontend publie, par exemple `https://mon-app.vercel.app`, sans chemin `/`.
+- `JWT_SECRET` est genere par Render ; conserve sa valeur lors des futurs deploiements pour ne pas invalider les sessions.
+
+Render ne fournit pas MySQL gratuit gere. Pour une base MySQL gratuite externe, Aiven propose une instance gratuite limitee a 1 Go. Cree la base et importe le schema et les donnees sauvegardes avant de lancer l'API : le profil `prod` utilise `ddl-auto=validate` et ne cree pas les tables. Ne copie jamais la base locale sans une sauvegarde verifiee. [Documentation MySQL gratuite Aiven](https://aiven.io/docs/products/mysql/concepts/mysql-free-tier).
+
+**Limite des fichiers :** le service web Render gratuit a un systeme de fichiers ephemere et ne peut pas recevoir de disque persistant. Le chemin `/tmp/sirhgp-uploads` sert uniquement au fonctionnement temporaire ; les documents televerses peuvent disparaitre lors d'un redemarrage ou redeploiement. Pour conserver les documents, configure un stockage objet externe ou un forfait Render payant avec disque persistant avant d'utiliser les televersements en production. Le service gratuit s'endort apres 15 minutes sans trafic et son prochain reveil peut prendre environ une minute. [Limites du plan gratuit Render](https://render.com/docs/free).
+
+Apres le premier deploiement, copie le domaine `onrender.com` obtenu dans `VITE_API_URL` sur Vercel en ajoutant `/api`, puis redeploie le frontend. Mets ensuite son origine exacte dans `CORS_ORIGINS` sur Render.
+
 ## Démarrage local avec Docker
 
 Depuis le dossier `SIRHGP_Backend` :

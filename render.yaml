@@ -1,0 +1,25 @@
+services:
+  - type: web
+    name: sirhgp-api
+    runtime: docker
+    plan: free
+    dockerfilePath: ./backend_sirhgp/Dockerfile
+    dockerContext: ./backend_sirhgp
+    healthCheckPath: /actuator/health
+    envVars:
+      - key: SPRING_PROFILES_ACTIVE
+        value: prod
+      - key: SERVER_PORT
+        value: "8080"
+      - key: DB_URL
+        sync: false
+      - key: DB_USERNAME
+        sync: false
+      - key: DB_PASSWORD
+        sync: false
+      - key: JWT_SECRET
+        generateValue: true
+      - key: CORS_ORIGINS
+        sync: false
+      - key: UPLOAD_DIR
+        value: /tmp/sirhgp-uploads
