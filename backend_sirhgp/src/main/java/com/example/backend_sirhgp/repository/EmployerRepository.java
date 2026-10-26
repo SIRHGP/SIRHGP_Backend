@@ -80,6 +80,12 @@ public interface EmployerRepository extends JpaRepository<Employer, Long> {
     @Query("SELECT e.poste.departement.id FROM Employer e WHERE e.id = :employerId")
     Optional<Long> findDepartementIdOfPoste(@Param("employerId") Long employerId);
 
+    @Query("SELECT DISTINCT e.poste.departement.id FROM Employer e " +
+            "WHERE e.entreprise.id = :entrepriseId AND e.sucursal.id = :sucursalId " +
+            "AND e.poste.departement.id IS NOT NULL")
+    List<Long> findDepartementIdsByEntrepriseAndSucursal(@Param("entrepriseId") Long entrepriseId,
+                                                          @Param("sucursalId") Long sucursalId);
+
     @Query("SELECT e.id FROM Employer e WHERE e.poste.departement.id IN :departementIds")
     List<Long> findIdsByDepartementIdIn(@Param("departementIds") List<Long> departementIds);
 

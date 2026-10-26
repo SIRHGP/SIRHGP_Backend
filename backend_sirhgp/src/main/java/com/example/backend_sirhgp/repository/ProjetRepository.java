@@ -50,6 +50,11 @@ public interface ProjetRepository extends JpaRepository<Projet, Long> {
     @Query("SELECT p FROM Projet p JOIN p.departements d WHERE d.id = :deptId")
     List<Projet> findByDepartementId(@Param("deptId") Long deptId);
 
+    @Query("SELECT DISTINCT d.id FROM Projet p JOIN p.departements d " +
+            "WHERE p.entreprise.id = :entrepriseId AND p.sucursal.id = :sucursalId")
+    List<Long> findDepartementIdsByEntrepriseAndSucursal(@Param("entrepriseId") Long entrepriseId,
+                                                          @Param("sucursalId") Long sucursalId);
+
     // ─── Chargement avec relations (SÉPARÉS pour éviter produit cartésien) ────
 
     /**

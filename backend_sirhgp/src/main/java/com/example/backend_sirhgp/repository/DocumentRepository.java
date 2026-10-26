@@ -57,6 +57,31 @@ public interface DocumentRepository extends JpaRepository<Document, Long> {
                                  @Param("status") DocumentStatus status,
                                  Pageable pageable);
 
+    @Query(value = """
+        SELECT d FROM Document d
+        LEFT JOIN d.expediteur exp LEFT JOIN exp.entreprise expCompany
+        LEFT JOIN d.employer emp LEFT JOIN emp.entreprise empCompany
+        LEFT JOIN d.projet p LEFT JOIN p.entreprise projectCompany
+        LEFT JOIN d.destinataire dest LEFT JOIN dest.entreprise destCompany
+        WHERE (exp.id = :employerId OR dest.id = :employerId)
+          AND d.status = :status
+          AND COALESCE(expCompany.id, empCompany.id, projectCompany.id, destCompany.id) = :entrepriseId
+        """,
+        countQuery = """
+        SELECT COUNT(d) FROM Document d
+        LEFT JOIN d.expediteur exp LEFT JOIN exp.entreprise expCompany
+        LEFT JOIN d.employer emp LEFT JOIN emp.entreprise empCompany
+        LEFT JOIN d.projet p LEFT JOIN p.entreprise projectCompany
+        LEFT JOIN d.destinataire dest LEFT JOIN dest.entreprise destCompany
+        WHERE (exp.id = :employerId OR dest.id = :employerId)
+          AND d.status = :status
+          AND COALESCE(expCompany.id, empCompany.id, projectCompany.id, destCompany.id) = :entrepriseId
+        """)
+    Page<Document> findAllByUserAndEntreprise(@Param("employerId") Long employerId,
+                                               @Param("entrepriseId") Long entrepriseId,
+                                               @Param("status") DocumentStatus status,
+                                               Pageable pageable);
+
     // ─── Documents publics ────────────────────────────────────────────────────
     @Query("""
         SELECT d FROM Document d
@@ -69,6 +94,111 @@ public interface DocumentRepository extends JpaRepository<Document, Long> {
     // ─── Tous les documents par statut (admin) ────────────────────────────────
     @Query("SELECT d FROM Document d WHERE d.status = :status")
     Page<Document> findAllByStatus(@Param("status") DocumentStatus status, Pageable pageable);
+
+    @Query(value = """
+        SELECT d FROM Document d
+        LEFT JOIN d.expediteur exp LEFT JOIN exp.entreprise expCompany
+        LEFT JOIN d.employer emp LEFT JOIN emp.entreprise empCompany
+        LEFT JOIN d.projet p LEFT JOIN p.entreprise projectCompany
+        LEFT JOIN d.destinataire dest LEFT JOIN dest.entreprise destCompany
+        WHERE d.status = :status
+          AND COALESCE(expCompany.id, empCompany.id, projectCompany.id, destCompany.id) = :entrepriseId
+        """,
+        countQuery = """
+        SELECT COUNT(d) FROM Document d
+        LEFT JOIN d.expediteur exp LEFT JOIN exp.entreprise expCompany
+        LEFT JOIN d.employer emp LEFT JOIN emp.entreprise empCompany
+        LEFT JOIN d.projet p LEFT JOIN p.entreprise projectCompany
+        LEFT JOIN d.destinataire dest LEFT JOIN dest.entreprise destCompany
+        WHERE d.status = :status
+          AND COALESCE(expCompany.id, empCompany.id, projectCompany.id, destCompany.id) = :entrepriseId
+        """)
+    Page<Document> findAllForEntreprise(@Param("entrepriseId") Long entrepriseId,
+                                        @Param("status") DocumentStatus status,
+                                        Pageable pageable);
+
+    @Query(value = """
+        SELECT DISTINCT d FROM Document d
+        LEFT JOIN d.expediteur exp LEFT JOIN exp.poste expPoste
+        LEFT JOIN exp.entreprise expCompany
+        LEFT JOIN d.destinataire dest LEFT JOIN dest.poste destPoste
+        LEFT JOIN dest.entreprise destCompany
+        LEFT JOIN d.employer emp LEFT JOIN emp.poste empPoste
+        LEFT JOIN emp.entreprise empCompany
+        LEFT JOIN d.projet projet LEFT JOIN projet.entreprise projectCompany
+        WHERE d.status = :status
+          AND COALESCE(expCompany.id, empCompany.id, projectCompany.id, destCompany.id) = :entrepriseId
+          AND (exp.sucursal.id = :sucursalId OR dest.sucursal.id = :sucursalId
+               OR emp.sucursal.id = :sucursalId OR projet.sucursal.id = :sucursalId
+               OR expPoste.departement.id IN :departementIds
+               OR destPoste.departement.id IN :departementIds
+               OR empPoste.departement.id IN :departementIds
+               OR EXISTS (SELECT dep.id FROM Projet p JOIN p.departements dep
+                          WHERE p.id = projet.id AND dep.id IN :departementIds))
+        """,
+        countQuery = """
+        SELECT COUNT(DISTINCT d) FROM Document d
+        LEFT JOIN d.expediteur exp LEFT JOIN exp.poste expPoste
+        LEFT JOIN exp.entreprise expCompany
+        LEFT JOIN d.destinataire dest LEFT JOIN dest.poste destPoste
+        LEFT JOIN dest.entreprise destCompany
+        LEFT JOIN d.employer emp LEFT JOIN emp.poste empPoste
+        LEFT JOIN emp.entreprise empCompany
+        LEFT JOIN d.projet projet LEFT JOIN projet.entreprise projectCompany
+        WHERE d.status = :status
+          AND COALESCE(expCompany.id, empCompany.id, projectCompany.id, destCompany.id) = :entrepriseId
+          AND (exp.sucursal.id = :sucursalId OR dest.sucursal.id = :sucursalId
+               OR emp.sucursal.id = :sucursalId OR projet.sucursal.id = :sucursalId
+               OR expPoste.departement.id IN :departementIds
+               OR destPoste.departement.id IN :departementIds
+               OR empPoste.departement.id IN :departementIds
+               OR EXISTS (SELECT dep.id FROM Projet p JOIN p.departements dep
+                          WHERE p.id = projet.id AND dep.id IN :departementIds))
+        """)
+    Page<Document> findAllForSucursal(@Param("entrepriseId") Long entrepriseId,
+                                      @Param("sucursalId") Long sucursalId,
+                                      @Param("departementIds") List<Long> departementIds,
+                                      @Param("status") DocumentStatus status,
+                                      Pageable pageable);
+
+    @Query(value = """
+        SELECT DISTINCT d FROM Document d
+        LEFT JOIN d.expediteur exp LEFT JOIN exp.poste expPoste
+        LEFT JOIN exp.entreprise expCompany
+        LEFT JOIN d.destinataire dest LEFT JOIN dest.poste destPoste
+        LEFT JOIN dest.entreprise destCompany
+        LEFT JOIN d.employer emp LEFT JOIN emp.poste empPoste
+        LEFT JOIN emp.entreprise empCompany
+        LEFT JOIN d.projet projet LEFT JOIN projet.entreprise projectCompany
+        WHERE d.status = :status
+          AND COALESCE(expCompany.id, empCompany.id, projectCompany.id, destCompany.id) = :entrepriseId
+          AND (expPoste.departement.id = :departementId
+               OR destPoste.departement.id = :departementId
+               OR empPoste.departement.id = :departementId
+               OR EXISTS (SELECT dep.id FROM Projet p JOIN p.departements dep
+                          WHERE p.id = projet.id AND dep.id = :departementId))
+        """,
+        countQuery = """
+        SELECT COUNT(DISTINCT d) FROM Document d
+        LEFT JOIN d.expediteur exp LEFT JOIN exp.poste expPoste
+        LEFT JOIN exp.entreprise expCompany
+        LEFT JOIN d.destinataire dest LEFT JOIN dest.poste destPoste
+        LEFT JOIN dest.entreprise destCompany
+        LEFT JOIN d.employer emp LEFT JOIN emp.poste empPoste
+        LEFT JOIN emp.entreprise empCompany
+        LEFT JOIN d.projet projet LEFT JOIN projet.entreprise projectCompany
+        WHERE d.status = :status
+          AND COALESCE(expCompany.id, empCompany.id, projectCompany.id, destCompany.id) = :entrepriseId
+          AND (expPoste.departement.id = :departementId
+               OR destPoste.departement.id = :departementId
+               OR empPoste.departement.id = :departementId
+               OR EXISTS (SELECT dep.id FROM Projet p JOIN p.departements dep
+                          WHERE p.id = projet.id AND dep.id = :departementId))
+        """)
+    Page<Document> findAllForDepartement(@Param("entrepriseId") Long entrepriseId,
+                                         @Param("departementId") Long departementId,
+                                         @Param("status") DocumentStatus status,
+                                         Pageable pageable);
 
     // ─── Chargement avec relations ────────────────────────────────────────────
     @Query("""
