@@ -40,6 +40,7 @@ public interface DepartementMapper {
     @Mapping(target = "id",              ignore = true)  // CORRECTION
     @Mapping(target = "postes", ignore = true)
     @Mapping(target = "superviseur", ignore = true)
+    @Mapping(target = "entreprise", ignore = true)
     @Mapping(target = "dateCreation",    ignore = true)
     @Mapping(target = "dateModification", ignore = true)
     void updateEntity(@MappingTarget Departement entity, String name);

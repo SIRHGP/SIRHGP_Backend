@@ -1,6 +1,8 @@
 package com.example.backend_sirhgp.repository;
 
 import com.example.backend_sirhgp.model.Facture;
+import org.springframework.data.domain.Page;
+import org.springframework.data.domain.Pageable;
 import org.springframework.data.jpa.repository.JpaRepository;
 import org.springframework.data.jpa.repository.Modifying;
 import org.springframework.data.jpa.repository.Query;
@@ -14,6 +16,10 @@ import java.util.Optional;
 
 @Repository
 public interface FactureRepository extends JpaRepository<Facture, Long> {
+
+    Page<Facture> findByEntrepriseId(Long entrepriseId, Pageable pageable);
+    Optional<Facture> findByIdAndEntrepriseId(Long id, Long entrepriseId);
+    List<Facture> findByProjetIdAndEntrepriseId(Long projetId, Long entrepriseId);
 
     @Query("SELECT f.entreprise.id, COUNT(f) FROM Facture f WHERE f.entreprise IS NOT NULL GROUP BY f.entreprise.id")
     List<Object[]> countGroupedByEntreprise();
@@ -58,6 +64,10 @@ public interface FactureRepository extends JpaRepository<Facture, Long> {
     // ─── Sommes pour projets ────────────────────────────────────────────────
     @Query("SELECT COALESCE(SUM(f.montantTTC), 0) FROM Facture f WHERE f.projet.id = :projetId")
     BigDecimal sumMontantTTCByProjetId(@Param("projetId") Long projetId);
+
+    @Query("SELECT COALESCE(SUM(f.montantTTC), 0) FROM Facture f WHERE f.projet.id = :projetId AND f.entreprise.id = :entrepriseId")
+    BigDecimal sumMontantTTCByProjetIdAndEntrepriseId(@Param("projetId") Long projetId,
+                                                     @Param("entrepriseId") Long entrepriseId);
 
     @Query("SELECT COALESCE(SUM(f.montantPaye), 0) FROM Facture f WHERE f.projet.id = :projetId")
     BigDecimal sumMontantPayeByProjetId(@Param("projetId") Long projetId);

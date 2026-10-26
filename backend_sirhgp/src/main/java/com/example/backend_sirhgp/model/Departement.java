@@ -22,7 +22,8 @@ import java.util.Set;
  * - @ToString exclut la collection postes pour éviter le lazy loading involontaire.
  */
 @Entity
-@Table(name = "departements")
+@Table(name = "departements", uniqueConstraints =
+        @UniqueConstraint(name = "uk_departement_entreprise_name", columnNames = {"entreprise_id", "name"}))
 @Getter
 @Setter
 @NoArgsConstructor
@@ -37,9 +38,12 @@ public class Departement {
     @EqualsAndHashCode.Include
     private Long id;
 
-    @Column(nullable = false, unique = true)
-    @EqualsAndHashCode.Include
+    @Column(nullable = false)
     private String name;
+
+    @ManyToOne(fetch = FetchType.LAZY)
+    @JoinColumn(name = "entreprise_id")
+    private Entreprise entreprise;
 
     @ManyToOne(fetch = FetchType.LAZY)
     @JoinColumn(name = "superviseur_id")

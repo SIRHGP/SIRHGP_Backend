@@ -69,6 +69,11 @@ public class FacturationCycleService {
 
         Projet projet = projetRepository.findById(dto.getProjetId())
                 .orElseThrow(() -> new ResourceNotFoundException("Projet non trouvé : " + dto.getProjetId()));
+        Long entrepriseId = entrepriseContextService.getScopeEntrepriseId();
+        if (entrepriseId == null || projet.getEntreprise() == null
+                || !entrepriseId.equals(projet.getEntreprise().getId())) {
+            throw new ResourceNotFoundException("Projet non trouvé : " + dto.getProjetId());
+        }
 
         FacturationCycle cycle = new FacturationCycle();
         cycle.setTitre(dto.getTitre().trim());
@@ -86,10 +91,7 @@ public class FacturationCycleService {
                     .orElseThrow(() -> new ResourceNotFoundException("Client non trouvé : " + dto.getClientId()));
             cycle.setClient(client);
         }
-        Long entrepriseId = entrepriseContextService.getScopeEntrepriseId();
-        if (entrepriseId != null) {
-            cycle.setEntreprise(entrepriseContextService.getRequiredEntreprise(entrepriseId));
-        }
+        cycle.setEntreprise(entrepriseContextService.getRequiredEntreprise(entrepriseId));
 
         FacturationCycle saved = cycleRepository.save(cycle);
         // Référence définitive au format CYC-AAAA-NNNN (une fois l'id attribué).
@@ -110,7 +112,8 @@ public class FacturationCycleService {
         Long scope = entrepriseContextService.getScopeEntrepriseId();
         List<FacturationCycle> list = scope != null
                 ? cycleRepository.findByEntrepriseId(scope, sort)
-                : cycleRepository.findAll(sort);
+                : "SUPER_ADMIN".equals(entrepriseContextService.currentRole())
+                    ? cycleRepository.findAll(sort) : List.of();
         return list.stream().map(this::toDto).collect(Collectors.toList());
     }
 
@@ -356,7 +359,10 @@ public class FacturationCycleService {
         FacturationCycle cycle = cycleRepository.findById(id)
                 .orElseThrow(() -> new ResourceNotFoundException("Dossier de facturation non trouvé : " + id));
         Long scope = entrepriseContextService.getScopeEntrepriseId();
-        if (scope != null && cycle.getEntreprise() != null && !scope.equals(cycle.getEntreprise().getId())) {
+        if (scope == null && !"SUPER_ADMIN".equals(entrepriseContextService.currentRole())) {
+            throw new ResourceNotFoundException("Dossier de facturation non trouvé : " + id);
+        }
+        if (scope != null && (cycle.getEntreprise() == null || !scope.equals(cycle.getEntreprise().getId()))) {
             throw new ResourceNotFoundException("Dossier de facturation non trouvé : " + id);
         }
         return cycle;

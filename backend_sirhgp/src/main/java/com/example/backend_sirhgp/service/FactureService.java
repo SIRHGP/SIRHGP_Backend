@@ -45,6 +45,7 @@ public class FactureService {
     private final ApplicationEventPublisher eventPublisher;
     private final PaiementFactureRepository paiementFactureRepository;
     private final FacturePdfService facturePdfService;
+    private final EntrepriseContextService entrepriseContextService;
 
     // ─── CRUD de base ─────────────────────────────────────────────────────────
 
@@ -52,12 +53,18 @@ public class FactureService {
     public FactureResponseDTO create(FactureRequestDTO dto) {
         Facture facture = factureMapper.toEntity(dto);
         Employer emetteur = getCurrentUser();
+        Long entrepriseId = requireEntrepriseId(emetteur);
+        if (entrepriseId == null) {
+            throw new UnauthorizedException("Une entreprise est requise pour créer une facture");
+        }
         facture.setEmetteur(emetteur);
         facture.setEntreprise(emetteur.getEntreprise());
 
         if (dto.getProjetId() != null) {
             Projet projet = projetRepository.findById(dto.getProjetId())
                     .orElseThrow(() -> new ResourceNotFoundException("Projet non trouvé : " + dto.getProjetId()));
+            verifierEntreprise(projet.getEntreprise() != null ? projet.getEntreprise().getId() : null, entrepriseId,
+                    "Projet non trouvé : " + dto.getProjetId());
             facture.setProjet(projet);
         }
 
@@ -81,28 +88,43 @@ public class FactureService {
 
     @Transactional(readOnly = true)
     public Page<FactureResponseDTO> findAll(Pageable pageable) {
-        return factureRepository.findAll(pageable)
+        Employer current = getCurrentUser();
+        Long entrepriseId = requireEntrepriseId(current);
+        Page<Facture> factures = entrepriseId == null
+                ? factureRepository.findAll(pageable)
+                : factureRepository.findByEntrepriseId(entrepriseId, pageable);
+        return factures
                 .map(f -> enrich(factureMapper.toResponseDTO(f), f));
     }
 
     @Transactional(readOnly = true)
     public FactureResponseDTO findById(Long id) {
-        Facture facture = factureRepository.findByIdWithRelations(id)
-                .orElseThrow(() -> new ResourceNotFoundException("Facture non trouvée : " + id));
+        Facture facture = requireFactureInScope(id, true);
         return enrich(factureMapper.toResponseDTO(facture), facture);
     }
 
     @Transactional(readOnly = true)
     public List<FactureResponseDTO> findByProjetId(Long projetId) {
-        return factureRepository.findByProjetId(projetId).stream()
+        Employer current = getCurrentUser();
+        Long entrepriseId = requireEntrepriseId(current);
+        List<Facture> factures = entrepriseId == null
+                ? factureRepository.findByProjetId(projetId)
+                : factureRepository.findByProjetIdAndEntrepriseId(projetId, entrepriseId);
+        return factures.stream()
                 .map(f -> enrich(factureMapper.toResponseDTO(f), f))
                 .collect(Collectors.toList());
     }
 
     @Transactional
     public FactureResponseDTO update(Long id, FactureRequestDTO dto) {
-        Facture facture = factureRepository.findByIdWithRelations(id)
-                .orElseThrow(() -> new ResourceNotFoundException("Facture non trouvée : " + id));
+        Facture facture = requireFactureInScope(id, true);
+        Long entrepriseId = requireEntrepriseId(getCurrentUser());
+        if (dto.getProjetId() != null) {
+            Projet projet = projetRepository.findById(dto.getProjetId())
+                    .orElseThrow(() -> new ResourceNotFoundException("Projet non trouvé : " + dto.getProjetId()));
+            verifierEntreprise(projet.getEntreprise() != null ? projet.getEntreprise().getId() : null,
+                    entrepriseId, "Projet non trouvé : " + dto.getProjetId());
+        }
         factureMapper.updateEntity(facture, dto);
         appliquerLignes(facture, dto.getLignesFacture());
         facture.calculerMontants();
@@ -132,8 +154,7 @@ public class FactureService {
 
     @Transactional
     public FactureResponseDTO updateStatut(Long id, Facture.StatutFacture statut) {
-        Facture facture = factureRepository.findById(id)
-                .orElseThrow(() -> new ResourceNotFoundException("Facture non trouvée : " + id));
+        Facture facture = requireFactureInScope(id, false);
         facture.setStatut(statut);
         facture.calculerMontants();
         return enrich(factureMapper.toResponseDTO(factureRepository.save(facture)), facture);
@@ -144,8 +165,7 @@ public class FactureService {
         if (montant == null || montant.compareTo(BigDecimal.ZERO) <= 0) {
             throw new IllegalArgumentException("Le montant du paiement doit être positif");
         }
-        Facture facture = factureRepository.findById(id)
-                .orElseThrow(() -> new ResourceNotFoundException("Facture non trouvée : " + id));
+        Facture facture = requireFactureInScope(id, false);
 
         facture.setMontantPaye(facture.getMontantPaye().add(montant));
         facture.calculerMontants();
@@ -157,8 +177,7 @@ public class FactureService {
     @Transactional
     public FactureResponseDTO enregistrerPaiement(Long id, PaiementFactureRequestDTO dto) {
         FactureResponseDTO response = enregistrerPaiement(id, dto.getMontant());
-        Facture facture = factureRepository.findById(id)
-                .orElseThrow(() -> new ResourceNotFoundException("Facture non trouvée : " + id));
+        Facture facture = requireFactureInScope(id, false);
         Employer user = getCurrentUser();
         PaiementFacture paiement = PaiementFacture.builder()
                 .facture(facture)
@@ -176,6 +195,7 @@ public class FactureService {
 
     @Transactional(readOnly = true)
     public List<PaiementFactureResponseDTO> getPaiements(Long factureId) {
+        requireFactureInScope(factureId, false);
         return paiementFactureRepository.findByFactureIdOrderByDatePaiementDesc(factureId).stream().map(p -> {
             PaiementFactureResponseDTO dto = new PaiementFactureResponseDTO();
             dto.setId(p.getId());
@@ -197,17 +217,14 @@ public class FactureService {
 
     @Transactional(readOnly = true)
     public byte[] genererPdf(Long factureId) {
-        Facture facture = factureRepository.findByIdWithRelations(factureId)
-                .orElseThrow(() -> new ResourceNotFoundException("Facture non trouvée : " + factureId));
+        Facture facture = requireFactureInScope(factureId, true);
         return facturePdfService.generer(facture);
     }
 
     @Transactional
     public void delete(Long id) {
-        if (!factureRepository.existsById(id)) {
-            throw new ResourceNotFoundException("Facture non trouvée : " + id);
-        }
-        factureRepository.deleteById(id);
+        Facture facture = requireFactureInScope(id, false);
+        factureRepository.delete(facture);
         log.info("Facture supprimée : {}", id);
     }
 
@@ -217,8 +234,7 @@ public class FactureService {
     public FactureResponseDTO dispatchToClient(Long factureId, FactureDispatchRequestDTO dto) {
         Employer emetteur = getCurrentUser();
 
-        Facture facture = factureRepository.findByIdWithRelations(factureId)
-                .orElseThrow(() -> new ResourceNotFoundException("Facture non trouvée: " + factureId));
+        Facture facture = requireFactureInScope(factureId, true);
 
         // Vérifier que l'utilisateur est bien l'émetteur
         if (!facture.getEmetteur().getId().equals(emetteur.getId())) {
@@ -271,8 +287,7 @@ public class FactureService {
     @Transactional(readOnly = true)
     public List<FactureResponseDTO> getReceivedFactures() {
         Employer currentUser = getCurrentUser();
-        return factureRepository.findByClientId(currentUser.getId())
-                .stream()
+        return factureRepository.findByClientId(currentUser.getId()).stream()
                 .map(f -> enrich(factureMapper.toResponseDTO(f), f))
                 .collect(Collectors.toList());
     }
@@ -289,8 +304,11 @@ public class FactureService {
     @Transactional(readOnly = true)
     public List<FactureResponseDTO> getSentFactures() {
         Employer currentUser = getCurrentUser();
+        requireEntrepriseId(currentUser);
+        Long entrepriseId = currentUser.getEntreprise().getId();
         return factureRepository.findByEmetteurId(currentUser.getId())
-                .stream()
+                .stream().filter(f -> f.getEntreprise() != null
+                        && entrepriseId.equals(f.getEntreprise().getId()))
                 .map(f -> enrich(factureMapper.toResponseDTO(f), f))
                 .collect(Collectors.toList());
     }
@@ -325,7 +343,9 @@ public class FactureService {
     private void updateBudgetProjet(Facture facture) {
         if (facture.getProjet() == null) return;
         Long projetId = facture.getProjet().getId();
-        BigDecimal total = factureRepository.sumMontantTTCByProjetId(projetId);
+        Long entrepriseId = facture.getEntreprise() != null ? facture.getEntreprise().getId() : null;
+        BigDecimal total = entrepriseId == null ? factureRepository.sumMontantTTCByProjetId(projetId)
+                : factureRepository.sumMontantTTCByProjetIdAndEntrepriseId(projetId, entrepriseId);
         Projet projet = facture.getProjet();
         projet.setBudgetConsomme(total);
         projet.updateBudget();
@@ -336,6 +356,32 @@ public class FactureService {
         Authentication auth = SecurityContextHolder.getContext().getAuthentication();
         return employerRepository.findByEmailWithRolesAndPoste(auth.getName())
                 .orElseThrow(() -> new ResourceNotFoundException("Utilisateur courant non trouvé"));
+    }
+
+    private Long requireEntrepriseId(Employer user) {
+        if (isSuperAdmin(user)) return null;
+        if (user.getEntreprise() == null || user.getEntreprise().getId() == null) {
+            throw new UnauthorizedException("Votre compte n'est rattaché à aucune entreprise");
+        }
+        return user.getEntreprise().getId();
+    }
+
+    private Facture requireFactureInScope(Long factureId, boolean loadRelations) {
+        Employer current = getCurrentUser();
+        Long entrepriseId = requireEntrepriseId(current);
+        if (entrepriseId == null) {
+            return (loadRelations ? factureRepository.findByIdWithRelations(factureId)
+                    : factureRepository.findById(factureId))
+                    .orElseThrow(() -> new ResourceNotFoundException("Facture non trouvée : " + factureId));
+        }
+        return factureRepository.findByIdAndEntrepriseId(factureId, entrepriseId)
+                .orElseThrow(() -> new ResourceNotFoundException("Facture non trouvée : " + factureId));
+    }
+
+    private void verifierEntreprise(Long ressourceEntrepriseId, Long entrepriseId, String message) {
+        if (entrepriseId != null && !entrepriseId.equals(ressourceEntrepriseId)) {
+            throw new ResourceNotFoundException(message);
+        }
     }
 
     private boolean isSuperAdmin(Employer employer) {

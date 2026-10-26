@@ -153,7 +153,7 @@ public class ApplicationInitializer implements ApplicationRunner {
         List<String> noms = List.of("Direction Générale", "Informatique & Systèmes", "Support & Opérations", "Auxiliaire");
         int created = 0;
         for (String nom : noms) {
-            if (departementRepository.findByName(nom).isEmpty()) {
+            if (departementRepository.findAllByName(nom).isEmpty()) {
                 departementRepository.save(Departement.builder().name(nom).build());
                 created++;
                 log.debug("✚ Département créé : {}", nom);

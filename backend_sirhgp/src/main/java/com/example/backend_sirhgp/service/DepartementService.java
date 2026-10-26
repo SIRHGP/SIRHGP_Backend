@@ -42,11 +42,25 @@ public class DepartementService {
     @Transactional
     public DepartementResponseDTO create(DepartementRequestDTO dto) {
         String name = dto.getName().trim();
-        if (departementRepository.existsByName(name)) {
+        Long scopeEntrepriseId = entrepriseContextService.getScopeEntrepriseId();
+        Long entrepriseId = scopeEntrepriseId != null ? scopeEntrepriseId : dto.getEntrepriseId();
+        boolean superAdmin = "SUPER_ADMIN".equals(entrepriseContextService.currentRole());
+        if (entrepriseId == null && !superAdmin) {
+            throw new IllegalArgumentException("Une entreprise doit être précisée pour ce département");
+        }
+        if (scopeEntrepriseId != null && dto.getEntrepriseId() != null
+                && !scopeEntrepriseId.equals(dto.getEntrepriseId())) {
+            throw new IllegalArgumentException("Vous ne pouvez créer un département que dans votre entreprise");
+        }
+        if (departementRepository.existsByNameAndEntrepriseId(name, entrepriseId)) {
             throw new IllegalArgumentException("Ce département existe déjà : " + name);
         }
 
-        Departement dep = Departement.builder().name(name).build();
+        Departement dep = Departement.builder()
+                .name(name)
+                .entreprise(entrepriseId != null
+                        ? entrepriseContextService.getRequiredEntreprise(entrepriseId) : null)
+                .build();
         appliquerSuperviseur(dep, dto.getSuperviseurId());
         dep = departementRepository.save(dep);
 
@@ -85,13 +99,6 @@ public class DepartementService {
     private Set<Long> allowedDepartmentIds() {
         String role = entrepriseContextService.currentRole();
         if ("SUPER_ADMIN".equals(role)) return null;
-        // Le modèle departements est une table de référence globale (aucune
-        // colonne entreprise_id). L'ADMIN doit donc pouvoir charger la liste
-        // complète; MANAGER et LEAD restent limités par leurs rattachements.
-        if ("ADMIN".equals(role)) {
-            return departementRepository.findAll().stream()
-                    .map(Departement::getId).collect(Collectors.toUnmodifiableSet());
-        }
         Long entrepriseId = entrepriseContextService.getScopeEntrepriseId();
         if (entrepriseId == null) return Set.of();
         Long sucursalId = entrepriseContextService.getScopeSucursalId();
@@ -127,10 +134,12 @@ public class DepartementService {
     public DepartementResponseDTO update(Long id, DepartementRequestDTO dto) {
         Departement dep = departementRepository.findById(id)
                 .orElseThrow(() -> new ResourceNotFoundException("Département non trouvé : " + id));
+        verifierLecture(dep.getId());
 
         String newName = dto.getName() != null ? dto.getName().trim() : null;
         if (newName != null && !newName.equals(dep.getName())) {
-            if (departementRepository.existsByName(newName)) {
+            Long entrepriseId = dep.getEntreprise() != null ? dep.getEntreprise().getId() : null;
+            if (entrepriseId == null || departementRepository.existsByNameAndEntrepriseId(newName, entrepriseId)) {
                 throw new IllegalArgumentException("Nom de département déjà utilisé : " + newName);
             }
             dep.setName(newName);
@@ -156,6 +165,17 @@ public class DepartementService {
                 || !scopeEntreprise.equals(superviseur.getEntreprise().getId()))) {
             throw new IllegalArgumentException("Le chef de département doit appartenir à votre entreprise");
         }
+        Long departementEntreprise = departement.getEntreprise() != null
+                ? departement.getEntreprise().getId() : null;
+        Long superviseurEntreprise = superviseur.getEntreprise() != null
+                ? superviseur.getEntreprise().getId() : null;
+        if (departementEntreprise != null && !departementEntreprise.equals(superviseurEntreprise)) {
+            throw new IllegalArgumentException("Le chef de département doit appartenir à l'entreprise du département");
+        }
+        if (departementEntreprise == null && "SUPER_ADMIN".equals(entrepriseContextService.currentRole())
+                && superviseur.getEntreprise() != null) {
+            departement.setEntreprise(superviseur.getEntreprise());
+        }
         Long scopeSucursal = entrepriseContextService.getScopeSucursalId();
         if (scopeSucursal != null && (superviseur.getSucursal() == null
                 || !scopeSucursal.equals(superviseur.getSucursal().getId()))) {
@@ -168,6 +188,7 @@ public class DepartementService {
     public void delete(Long id) {
         Departement dep = departementRepository.findByIdWithPostes(id)
                 .orElseThrow(() -> new ResourceNotFoundException("Département non trouvé : " + id));
+        verifierLecture(dep.getId());
 
         // Dissocier les postes avant suppression
         if (dep.getPostes() != null && !dep.getPostes().isEmpty()) {
@@ -183,6 +204,7 @@ public class DepartementService {
     public DepartementResponseDTO addPoste(Long departementId, Long posteId) {
         Departement dep = departementRepository.findByIdWithPostes(departementId)
                 .orElseThrow(() -> new ResourceNotFoundException("Département non trouvé : " + departementId));
+        verifierLecture(dep.getId());
         Poste poste = posteRepository.findById(posteId)
                 .orElseThrow(() -> new ResourceNotFoundException("Poste non trouvé : " + posteId));
 
@@ -197,6 +219,7 @@ public class DepartementService {
     public DepartementResponseDTO removePoste(Long departementId, Long posteId) {
         Departement dep = departementRepository.findByIdWithPostes(departementId)
                 .orElseThrow(() -> new ResourceNotFoundException("Département non trouvé : " + departementId));
+        verifierLecture(dep.getId());
         Poste poste = posteRepository.findById(posteId)
                 .orElseThrow(() -> new ResourceNotFoundException("Poste non trouvé : " + posteId));
 
@@ -211,9 +234,7 @@ public class DepartementService {
 
     private DepartementResponseDTO enrichAndMap(Departement dep) {
         DepartementResponseDTO dto = departementMapper.toResponseDTO(dep);
-        // L'ADMIN reçoit le catalogue global, mais les effectifs restent propres à son entreprise.
-        Long entrepriseId = "ADMIN".equals(entrepriseContextService.currentRole())
-                ? entrepriseContextService.getScopeEntrepriseId() : null;
+        Long entrepriseId = entrepriseContextService.getScopeEntrepriseId();
         dto.setNombreEmployes(entrepriseId == null
                 ? employerRepository.countActifsByDepartementId(dep.getId())
                 : employerRepository.countActifsByDepartementIdAndEntrepriseId(dep.getId(), entrepriseId));

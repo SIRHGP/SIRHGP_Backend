@@ -14,4 +14,7 @@ public class DepartementRequestDTO {
     private Set<Long> projetIds;
 
     private Long superviseurId;
+
+    /** Utilisé uniquement par SUPER_ADMIN ; ADMIN est toujours scopé à son entreprise. */
+    private Long entrepriseId;
 }
