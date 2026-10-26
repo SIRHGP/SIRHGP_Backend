@@ -97,7 +97,7 @@ public class AuditController {
     }
 
     @GetMapping("/stats")
-    @PreAuthorize("hasAnyRole('SUPER_ADMIN', 'ADMIN')")
+    @PreAuthorize("hasAnyRole('SUPER_ADMIN', 'ADMIN', 'MANAGER', 'LEAD')")
     public ResponseEntity<ApiResponse<Map<String, Object>>> getStats(
             @RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE_TIME) LocalDateTime fromDate,
             @RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE_TIME) LocalDateTime toDate,
@@ -118,10 +118,7 @@ public class AuditController {
             toDate = LocalDateTime.now();
         }
 
-        Map<String, Object> stats = new LinkedHashMap<>();
-        stats.put("totalActions", auditLogService.countActions(fromDate, toDate));
-        stats.put("byActionType", auditLogService.getStatsByActionType(fromDate, toDate));
-        stats.put("topUsers", auditLogService.getTopActiveUsers(fromDate, toDate, 10));
+        Map<String, Object> stats = auditLogService.getScopedStats(fromDate, toDate, 10);
         return ResponseEntity.ok(new ApiResponse<>(true, "Statistiques d'audit récupérées", stats));
     }
 

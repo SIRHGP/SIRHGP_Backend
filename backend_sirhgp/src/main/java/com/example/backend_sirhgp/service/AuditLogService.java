@@ -6,6 +6,7 @@ import com.example.backend_sirhgp.exception.ResourceNotFoundException;
 import com.example.backend_sirhgp.model.AuditLog;
 import com.example.backend_sirhgp.model.Employer;
 import com.example.backend_sirhgp.repository.AuditLogRepository;
+import com.example.backend_sirhgp.repository.EmployerRepository;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.context.ApplicationEventPublisher;
@@ -27,6 +28,7 @@ import java.util.stream.Collectors;
 public class AuditLogService {
 
     private final AuditLogRepository auditLogRepository;
+    private final EmployerRepository employerRepository;
     private final ApplicationEventPublisher eventPublisher;
     private final EntrepriseContextService entrepriseContextService;
 
@@ -61,24 +63,19 @@ public class AuditLogService {
         if (entrepriseContextService.isSuperAdmin()) {
             return auditLogRepository.findAll(sortedPageable);
         }
-        Long own = entrepriseContextService.getScopeEntrepriseId();
-        if (own == null) return Page.empty(sortedPageable);
-
-        Long sucursalId = scopeSucursalId();
-        if (sucursalId != null) {
-            return auditLogRepository.findByUserSucursalId(sucursalId, sortedPageable);
-        }
-        List<Long> departementIds = scopeDepartementIds();
-        if (!departementIds.isEmpty()) {
-            return auditLogRepository.findByUserDepartementIds(departementIds, sortedPageable);
-        }
-        return auditLogRepository.findByUserEntrepriseId(own, sortedPageable);
+        List<Long> actorIds = scopedActorIds();
+        return actorIds.isEmpty() ? Page.empty(sortedPageable)
+                : auditLogRepository.findByUserIdIn(actorIds, sortedPageable);
     }
 
     @Transactional(readOnly = true)
     public AuditLog findById(Long id) {
-        return auditLogRepository.findById(id)
+        AuditLog log = auditLogRepository.findById(id)
                 .orElseThrow(() -> new ResourceNotFoundException("Journal d'audit introuvable : " + id));
+        if (!isSuperAdmin() && (log.getUserId() == null || !scopedActorIds().contains(log.getUserId()))) {
+            throw new ResourceNotFoundException("Journal d'audit introuvable : " + id);
+        }
+        return log;
     }
 
     @Transactional(readOnly = true)
@@ -93,6 +90,14 @@ public class AuditLogService {
         } else {
             effective = entrepriseContextService.getScopeEntrepriseId();
             if (effective == null) return Page.empty(pageable);
+        }
+
+        String role = entrepriseContextService.currentRole();
+        if ("MANAGER".equals(role) && entrepriseContextService.getScopeSucursalId() == null) {
+            return Page.empty(pageable);
+        }
+        if ("LEAD".equals(role) && scopeDepartementIds().isEmpty()) {
+            return Page.empty(pageable);
         }
 
         // 5.9 (RG-M2-13 / P1-10) : au-delà du tenant, les rôles de terrain sont
@@ -191,12 +196,61 @@ public class AuditLogService {
 
     @Transactional(readOnly = true)
     public Page<AuditLog> findByUserId(Long userId, Pageable pageable) {
-        return auditLogRepository.findByUserId(userId, pageable);
+        if (isSuperAdmin()) return auditLogRepository.findByUserId(userId, pageable);
+        List<Long> actorIds = scopedActorIds();
+        return actorIds.contains(userId) ? auditLogRepository.findByUserId(userId, pageable)
+                : Page.empty(pageable);
     }
 
     @Transactional(readOnly = true)
     public Page<AuditLog> findByEntity(String entityType, Long entityId, Pageable pageable) {
-        return auditLogRepository.findByEntityTypeAndEntityId(entityType, entityId, pageable);
+        if (isSuperAdmin()) return auditLogRepository.findByEntityTypeAndEntityId(entityType, entityId, pageable);
+        List<Long> actorIds = scopedActorIds();
+        return actorIds.isEmpty() ? Page.empty(pageable)
+                : auditLogRepository.findByEntityTypeAndEntityIdAndUserIdIn(entityType, entityId, actorIds, pageable);
+    }
+
+    @Transactional(readOnly = true)
+    public Map<String, Object> getScopedStats(LocalDateTime fromDate, LocalDateTime toDate, int limit) {
+        boolean global = isSuperAdmin();
+        List<Long> actorIds = global ? null : scopedActorIds();
+        long total = global ? auditLogRepository.countByTimestampBetween(fromDate, toDate)
+                : actorIds.isEmpty() ? 0 : auditLogRepository.countByUserIdsAndTimestampBetween(actorIds, fromDate, toDate);
+        List<Object[]> actionRows = global ? auditLogRepository.countByActionTypeBetween(fromDate, toDate)
+                : actorIds.isEmpty() ? List.of()
+                    : auditLogRepository.countByActionTypeBetweenForUsers(actorIds, fromDate, toDate);
+        Map<AuditActionType, Long> byAction = actionRows.stream().collect(Collectors.toMap(
+                row -> (AuditActionType) row[0], row -> (Long) row[1]));
+        List<Object[]> topUsers = global ? auditLogRepository.topActiveUsers(fromDate, toDate, PageRequest.of(0, limit))
+                : actorIds.isEmpty() ? List.of()
+                    : auditLogRepository.topActiveUsersForUsers(actorIds, fromDate, toDate, PageRequest.of(0, limit));
+        return Map.of("totalActions", total, "byActionType", byAction, "topUsers", topUsers);
+    }
+
+    private boolean isSuperAdmin() {
+        return entrepriseContextService.isSuperAdmin();
+    }
+
+    /** Liste d'acteurs dans le périmètre strict de l'utilisateur courant. */
+    private List<Long> scopedActorIds() {
+        Long entrepriseId = entrepriseContextService.getScopeEntrepriseId();
+        if (entrepriseId == null) return List.of();
+        String role = entrepriseContextService.currentRole();
+        if (role == null) return List.of();
+        return switch (role) {
+            case "ADMIN" -> employerRepository.findIdsByEntrepriseId(entrepriseId);
+            case "MANAGER" -> {
+                Long sucursalId = entrepriseContextService.getScopeSucursalId();
+                yield sucursalId == null ? List.of()
+                        : employerRepository.findIdsByEntrepriseIdAndSucursalId(entrepriseId, sucursalId);
+            }
+            case "LEAD" -> {
+                List<Long> departments = scopeDepartementIds();
+                yield departments.isEmpty() ? List.of()
+                        : employerRepository.findIdsByEntrepriseIdAndDepartementIds(entrepriseId, departments);
+            }
+            default -> List.of();
+        };
     }
 
     @Transactional(readOnly = true)

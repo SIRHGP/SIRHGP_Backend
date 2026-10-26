@@ -119,16 +119,22 @@ public class FactureService {
     public FactureResponseDTO update(Long id, FactureRequestDTO dto) {
         Facture facture = requireFactureInScope(id, true);
         Long entrepriseId = requireEntrepriseId(getCurrentUser());
+        Projet projet = null;
         if (dto.getProjetId() != null) {
-            Projet projet = projetRepository.findById(dto.getProjetId())
+            projet = projetRepository.findById(dto.getProjetId())
                     .orElseThrow(() -> new ResourceNotFoundException("Projet non trouvé : " + dto.getProjetId()));
             verifierEntreprise(projet.getEntreprise() != null ? projet.getEntreprise().getId() : null,
                     entrepriseId, "Projet non trouvé : " + dto.getProjetId());
         }
+        Projet ancienProjet = facture.getProjet();
         factureMapper.updateEntity(facture, dto);
+        facture.setProjet(projet);
         appliquerLignes(facture, dto.getLignesFacture());
         facture.calculerMontants();
         Facture saved = factureRepository.save(facture);
+        if (ancienProjet != null && (projet == null || !ancienProjet.getId().equals(projet.getId()))) {
+            updateBudgetProjet(ancienProjet);
+        }
         updateBudgetProjet(saved);
         return enrich(factureMapper.toResponseDTO(saved), saved);
     }
@@ -341,12 +347,15 @@ public class FactureService {
     }
 
     private void updateBudgetProjet(Facture facture) {
-        if (facture.getProjet() == null) return;
-        Long projetId = facture.getProjet().getId();
-        Long entrepriseId = facture.getEntreprise() != null ? facture.getEntreprise().getId() : null;
+        if (facture.getProjet() != null) updateBudgetProjet(facture.getProjet());
+    }
+
+    private void updateBudgetProjet(Projet projet) {
+        if (projet == null) return;
+        Long projetId = projet.getId();
+        Long entrepriseId = projet.getEntreprise() != null ? projet.getEntreprise().getId() : null;
         BigDecimal total = entrepriseId == null ? factureRepository.sumMontantTTCByProjetId(projetId)
                 : factureRepository.sumMontantTTCByProjetIdAndEntrepriseId(projetId, entrepriseId);
-        Projet projet = facture.getProjet();
         projet.setBudgetConsomme(total);
         projet.updateBudget();
         projetRepository.save(projet);

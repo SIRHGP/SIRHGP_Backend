@@ -59,6 +59,14 @@ public interface EmployerRepository extends JpaRepository<Employer, Long> {
     List<Employer> findByPosteId(Long posteId);
     List<Employer> findByRoleId(Long roleId);
     List<Employer> findByEntrepriseId(Long entrepriseId);
+    @Query("SELECT e.id FROM Employer e WHERE e.entreprise.id = :entrepriseId")
+    List<Long> findIdsByEntrepriseId(@Param("entrepriseId") Long entrepriseId);
+    @Query("SELECT e.id FROM Employer e WHERE e.entreprise.id = :entrepriseId AND e.sucursal.id = :sucursalId")
+    List<Long> findIdsByEntrepriseIdAndSucursalId(@Param("entrepriseId") Long entrepriseId,
+                                                   @Param("sucursalId") Long sucursalId);
+    @Query("SELECT e.id FROM Employer e WHERE e.entreprise.id = :entrepriseId AND e.poste.departement.id IN :departementIds")
+    List<Long> findIdsByEntrepriseIdAndDepartementIds(@Param("entrepriseId") Long entrepriseId,
+                                                       @Param("departementIds") List<Long> departementIds);
     List<Employer> findBySucursalIdAndActifTrueOrderByNameAsc(Long sucursalId);
     long countBySucursalId(Long sucursalId);
 

@@ -34,7 +34,6 @@ public class FactureRequestDTO {
     @NotNull(message = "Le type de facture est obligatoire")
     private Facture.TypeFacture typeFacture;
 
-    @NotNull(message = "Le projet est obligatoire")
     private Long projetId;
 
     // Client (destinataire) - optionnel lors de la création, sera défini lors du dispatch

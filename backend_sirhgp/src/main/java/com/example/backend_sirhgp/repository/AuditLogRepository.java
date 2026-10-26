@@ -16,6 +16,9 @@ import java.util.List;
 public interface AuditLogRepository extends JpaRepository<AuditLog, Long> {
 
     Page<AuditLog> findByUserId(Long userId, Pageable pageable);
+    Page<AuditLog> findByUserIdIn(List<Long> userIds, Pageable pageable);
+    Page<AuditLog> findByEntityTypeAndEntityIdAndUserIdIn(String entityType, Long entityId,
+                                                           List<Long> userIds, Pageable pageable);
 
     Page<AuditLog> findByActionType(AuditActionType actionType, Pageable pageable);
 
@@ -169,4 +172,25 @@ public interface AuditLogRepository extends JpaRepository<AuditLog, Long> {
                                   Pageable pageable);
 
     long countByTimestampBetween(LocalDateTime fromDate, LocalDateTime toDate);
+
+    @Query("SELECT COUNT(a) FROM AuditLog a WHERE a.userId IN :userIds " +
+            "AND a.timestamp >= :fromDate AND a.timestamp <= :toDate")
+    long countByUserIdsAndTimestampBetween(@Param("userIds") List<Long> userIds,
+                                           @Param("fromDate") LocalDateTime fromDate,
+                                           @Param("toDate") LocalDateTime toDate);
+
+    @Query("SELECT a.actionType, COUNT(a) FROM AuditLog a WHERE a.userId IN :userIds " +
+            "AND a.timestamp >= :fromDate AND a.timestamp <= :toDate " +
+            "GROUP BY a.actionType ORDER BY COUNT(a) DESC")
+    List<Object[]> countByActionTypeBetweenForUsers(@Param("userIds") List<Long> userIds,
+                                                     @Param("fromDate") LocalDateTime fromDate,
+                                                     @Param("toDate") LocalDateTime toDate);
+
+    @Query("SELECT a.userEmail, a.userName, COUNT(a) FROM AuditLog a WHERE a.userId IN :userIds " +
+            "AND a.timestamp >= :fromDate AND a.timestamp <= :toDate AND a.userEmail IS NOT NULL " +
+            "GROUP BY a.userEmail, a.userName ORDER BY COUNT(a) DESC")
+    List<Object[]> topActiveUsersForUsers(@Param("userIds") List<Long> userIds,
+                                          @Param("fromDate") LocalDateTime fromDate,
+                                          @Param("toDate") LocalDateTime toDate,
+                                          Pageable pageable);
 }
