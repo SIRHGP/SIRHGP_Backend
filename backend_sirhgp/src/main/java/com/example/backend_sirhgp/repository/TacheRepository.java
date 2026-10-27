@@ -42,6 +42,12 @@ public interface TacheRepository extends JpaRepository<Tache, Long> {
 
     List<Tache> findByDateEcheanceBeforeAndStatutNot(LocalDate date, Tache.StatutTache statut);
 
+    @Query("SELECT t FROM Tache t " +
+            "LEFT JOIN FETCH t.assignee " +
+            "LEFT JOIN FETCH t.createur " +
+            "LEFT JOIN FETCH t.projet")
+    List<Tache> findAllWithRelations();
+
     List<Tache> findByAssigneeIdAndStatut(Long assigneeId, Tache.StatutTache statut);
 
     // ─── Compteurs pour les ResponseDTOs (évite N+1) ──────────
@@ -103,6 +109,13 @@ public interface TacheRepository extends JpaRepository<Tache, Long> {
             "WHERE t.projet.id = :projetId " +
             "ORDER BY t.priorite DESC, t.dateEcheance ASC")
     List<Tache> findByProjetIdWithAssignee(@Param("projetId") Long projetId);
+
+    @Query("SELECT t FROM Tache t " +
+            "LEFT JOIN FETCH t.assignee " +
+            "LEFT JOIN FETCH t.createur " +
+            "LEFT JOIN FETCH t.projet " +
+            "WHERE t.projet.id = :projetId")
+    List<Tache> findByProjetIdWithScopeRelations(@Param("projetId") Long projetId);
 
     @Query("SELECT t FROM Tache t " +
             "LEFT JOIN FETCH t.assignee " +

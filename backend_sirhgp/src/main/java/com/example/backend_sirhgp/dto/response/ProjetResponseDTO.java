@@ -23,6 +23,7 @@ public class ProjetResponseDTO {
     private String codeProjet;
     private Long entrepriseId;
     private Long sucursalId;
+    private String sucursalNom;
     private Projet.StatutProjet statut;
     private LocalDate dateDebut;
     private LocalDate dateFinPrevue;
@@ -78,6 +79,8 @@ public class ProjetResponseDTO {
         private String email;
         private String posteName;
         private String departementNom;
+        private Long departementId;
+        private Long sucursalId;
     }
 
     @Data

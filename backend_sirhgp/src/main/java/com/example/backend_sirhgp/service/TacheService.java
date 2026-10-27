@@ -57,6 +57,7 @@ public class TacheService {
     private final DemandePermissionRepository demandePermissionRepository;
     private final SucursalRepository sucursalRepository;
     private final EntrepriseContextService entrepriseContextService;
+    private final TacheAccessService tacheAccessService;
 
     @Transactional(readOnly = true)
     public Map<String, Object> getMonEtat() {
@@ -113,23 +114,10 @@ public class TacheService {
     @Transactional(readOnly = true)
     public Page<TacheResponseDTO> findAll(Pageable pageable) {
         Employer current = getCurrentUser();
-        if (isSecretary(current)) {
-            List<TacheResponseDTO> items = tacheRepository.findAll().stream()
-                    .filter(t -> dansSuccursale(current, t)
-                            && ((t.getCreateur() != null && current.getId().equals(t.getCreateur().getId()))
-                            || (t.getAssignee() != null && current.getId().equals(t.getAssignee().getId()))))
-                    .map(t -> enrich(tacheMapper.toResponseDTO(t), t)).toList();
-            return page(items, pageable);
-        }
-        if (isSuperAdmin(current)) {
-            return tacheRepository.findAll(pageable).map(t -> enrich(tacheMapper.toResponseDTO(t), t));
-        }
-        if (current.getEntreprise() == null) return Page.empty(pageable);
-        Page<Tache> scoped = current.getSucursal() == null || isAdmin(current)
-                ? tacheRepository.findByEntrepriseId(current.getEntreprise().getId(), pageable)
-                : tacheRepository.findByEntrepriseIdAndSucursalId(
-                        current.getEntreprise().getId(), current.getSucursal().getId(), pageable);
-        return scoped.map(t -> enrich(tacheMapper.toResponseDTO(t), t));
+        List<TacheResponseDTO> visibles = tacheRepository.findAllWithRelations().stream()
+                .filter(t -> tacheVisiblePourUtilisateur(t, current))
+                .map(t -> enrich(tacheMapper.toResponseDTO(t), t)).toList();
+        return page(visibles, pageable);
     }
 
     @Transactional(readOnly = true)
@@ -149,7 +137,7 @@ public class TacheService {
                 .orElseThrow(() -> new ResourceNotFoundException("Employé non trouvé : " + assigneeId));
         verifierEmployeAccessible(current, assignee);
         return tacheRepository.findByAssigneeIdWithRelations(assigneeId).stream()
-                .filter(t -> estTacheDansScope(current, t))
+                .filter(t -> tacheVisiblePourUtilisateur(t, current))
                 .map(t -> enrich(tacheMapper.toResponseDTO(t), t))
                 .collect(Collectors.toList());
     }
@@ -162,7 +150,7 @@ public class TacheService {
         verifierProjetAccessible(current, projet);
         // CORRECTION : query avec JOIN FETCH sur assignee
         return tacheRepository.findByProjetIdWithAssignee(projetId).stream()
-                .filter(t -> estTacheDansScope(current, t))
+                .filter(t -> tacheVisiblePourUtilisateur(t, current))
                 .map(t -> enrich(tacheMapper.toResponseDTO(t), t))
                 .collect(Collectors.toList());
     }
@@ -277,6 +265,17 @@ public class TacheService {
         if (scopeSucursal != null && (projet.getSucursal() == null
                 || !scopeSucursal.equals(projet.getSucursal().getId())))
             throw new org.springframework.security.access.AccessDeniedException("Projet hors de votre succursale.");
+        String role = user.getRole() != null ? user.getRole().getName() : "";
+        if ("LEAD".equals(role)) {
+            List<Long> depts = entrepriseContextService.getScopeDepartementIds();
+            if (!depts.isEmpty() && (projet.getDepartements() == null || projet.getDepartements().stream()
+                    .noneMatch(d -> depts.contains(d.getId()))))
+                throw new org.springframework.security.access.AccessDeniedException("Projet hors de vos départements.");
+        }
+        if (("STAFF".equals(role) || "STAGIAIRE".equals(role))
+                && (projet.getChefProjet() == null || !user.getId().equals(projet.getChefProjet().getId()))
+                && (projet.getMembres() == null || projet.getMembres().stream().noneMatch(e -> user.getId().equals(e.getId()))))
+            throw new org.springframework.security.access.AccessDeniedException("Projet non attribué à votre profil.");
     }
 
     private void verifierEmployeAccessible(Employer user, Employer employee) {
@@ -299,16 +298,13 @@ public class TacheService {
                 && scopeSucursal.equals(tache.getSucursal().getId()));
     }
 
+    private boolean tacheVisiblePourUtilisateur(Tache tache, Employer user) {
+        return tacheAccessService.peutVoir(tache, user);
+    }
+
     private void verifierTacheAccessible(Tache tache, Employer user) {
-        if (isSuperAdmin(user)) return;
-        if (user.getEntreprise() == null || tache.getEntreprise() == null
-                || !user.getEntreprise().getId().equals(tache.getEntreprise().getId()))
+        if (!tacheVisiblePourUtilisateur(tache, user))
             throw new ResourceNotFoundException("Tâche non trouvée : " + tache.getId());
-        Long scopeSucursal = entrepriseContextService.getScopeSucursalId();
-        if (scopeSucursal != null && (tache.getSucursal() == null
-                || !scopeSucursal.equals(tache.getSucursal().getId())))
-            throw new ResourceNotFoundException("Tâche non trouvée : " + tache.getId());
-        verifierLectureSecretaire(tache, user);
     }
     private boolean dansSuccursale(Employer user, Tache t) {
         return user.getEntreprise() != null && user.getSucursal() != null && t.getEntreprise() != null && t.getSucursal() != null

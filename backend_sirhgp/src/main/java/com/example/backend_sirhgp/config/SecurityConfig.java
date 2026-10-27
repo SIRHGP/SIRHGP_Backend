@@ -129,14 +129,18 @@ public class SecurityConfig {
                         .requestMatchers("/api/secretariat/**").hasRole("SECRETAIRE")
                         .requestMatchers("/api/factures/**", "/api/facturation-cycles/**").hasAnyRole("ADMIN", "MANAGER")
                         .requestMatchers(HttpMethod.GET,
-                                "/api/projets/*/factures/**", "/api/projets/dashboard/**",
+                                "/api/projets/dashboard/**",
                                 "/api/projets/*/dashboard", "/api/projets/statistiques/**")
-                                .hasAnyRole("SUPER_ADMIN", "ADMIN", "MANAGER", "STAFF", "STAGIAIRE", "LEAD")
+                                .hasAnyRole("ADMIN", "MANAGER", "STAFF", "STAGIAIRE", "LEAD")
+                        .requestMatchers(HttpMethod.GET, "/api/projets/*/factures/**")
+                                .hasAnyRole("ADMIN", "MANAGER")
                         .requestMatchers(HttpMethod.GET, "/api/projets/**")
-                                .hasAnyRole("SUPER_ADMIN", "ADMIN", "MANAGER", "STAFF", "STAGIAIRE", "LEAD", "SECRETAIRE")
+                                .hasAnyRole("ADMIN", "MANAGER", "STAFF", "STAGIAIRE", "LEAD", "SECRETAIRE")
                         .requestMatchers("/api/projets/**")
-                                .hasAnyRole("SUPER_ADMIN", "ADMIN", "MANAGER", "STAFF")
-                        .requestMatchers("/api/taches/**", "/api/evenements/**")
+                                .hasAnyRole("ADMIN", "MANAGER", "LEAD")
+                        .requestMatchers("/api/taches/**")
+                                .hasAnyRole("ADMIN", "MANAGER", "STAFF", "STAGIAIRE", "LEAD", "SECRETAIRE")
+                        .requestMatchers("/api/evenements/**")
                                 .hasAnyRole("SUPER_ADMIN", "ADMIN", "MANAGER", "STAFF", "STAGIAIRE", "LEAD", "SECRETAIRE")
 
                         // Autres routes

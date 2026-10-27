@@ -26,6 +26,7 @@ public interface ProjetMapper {
     @Mapping(target = "departements",  expression = "java(mapDepartements(projet.getDepartements()))")
     @Mapping(source = "entreprise.id", target = "entrepriseId")
     @Mapping(source = "sucursal.id", target = "sucursalId")
+    @Mapping(source = "sucursal.name", target = "sucursalNom")
     @Mapping(target = "nombreTaches",            ignore = true)
     @Mapping(target = "nombreTachesTerminees",   ignore = true)
     @Mapping(target = "nombreTachesEnCours",     ignore = true)
@@ -86,10 +87,12 @@ public interface ProjetMapper {
         dto.setId(employer.getId());
         dto.setName(employer.getName());
         dto.setEmail(employer.getEmail());
+        if (employer.getSucursal() != null) dto.setSucursalId(employer.getSucursal().getId());
         if (employer.getPoste() != null) {
             dto.setPosteName(employer.getPoste().getName());
             if (employer.getPoste().getDepartement() != null) {
                 dto.setDepartementNom(employer.getPoste().getDepartement().getName());
+                dto.setDepartementId(employer.getPoste().getDepartement().getId());
             }
         }
         return dto;

@@ -35,9 +35,11 @@ public class ProjetService {
     private final ProjetMapper projetMapper;
     private final EntrepriseContextService entrepriseContextService;
     private final SucursalRepository sucursalRepository;
+    private final TacheAccessService tacheAccessService;
 
     @Transactional
     public ProjetResponseDTO create(ProjetRequestDTO dto) {
+        verifierRoleGestion();
         if (projetRepository.existsByNom(dto.getNom())) {
             throw new IllegalArgumentException("Un projet avec ce nom existe déjà : " + dto.getNom());
         }
@@ -50,6 +52,7 @@ public class ProjetService {
         }
         resolveRelations(projet, dto);
         appliquerScopeCreation(projet, dto);
+        verifierRelationsProjet(projet);
         projet.updateBudget();
         Projet saved = projetRepository.save(projet);
         log.info("Projet créé : {} ({})", saved.getNom(), saved.getCodeProjet());
@@ -58,11 +61,9 @@ public class ProjetService {
 
     @Transactional(readOnly = true)
     public Page<ProjetResponseDTO> findAll(Pageable pageable) {
-        Long sucursalId = entrepriseContextService.getScopeSucursalId();
-        Long entrepriseId = entrepriseContextService.getScopeEntrepriseId();
-        List<Projet> scoped = sucursalId != null ? projetRepository.findBySucursalId(sucursalId)
-                : entrepriseId != null ? projetRepository.findByEntrepriseId(entrepriseId) : projetRepository.findAll();
-        List<ProjetResponseDTO> dtos = scoped.stream().map(this::enrichAndMap).toList();
+        List<ProjetResponseDTO> dtos = projetRepository.findAll().stream()
+                .filter(this::projetVisiblePourUtilisateur)
+                .map(this::enrichAndMap).toList();
         if (pageable.isUnpaged()) return new org.springframework.data.domain.PageImpl<>(dtos);
         int from = Math.min((int) pageable.getOffset(), dtos.size());
         int to = Math.min(from + pageable.getPageSize(), dtos.size());
@@ -81,10 +82,11 @@ public class ProjetService {
     public ProjetResponseDTO update(Long id, ProjetRequestDTO dto) {
         Projet projet = projetRepository.findByIdWithMembres(id)
                 .orElseThrow(() -> new ResourceNotFoundException("Projet non trouvé : " + id));
+        verifierGestionProjet(projet);
         projetMapper.updateEntity(projet, dto);
-        verifierLectureScope(projet);
         resolveRelations(projet, dto);
         appliquerScopeModification(projet, dto);
+        verifierRelationsProjet(projet);
         if (projet.getStatut() == Projet.StatutProjet.TERMINE && projet.getDateFinReelle() == null) {
             projet.setDateFinReelle(LocalDate.now());
         }
@@ -94,11 +96,95 @@ public class ProjetService {
     }
 
     private void verifierLectureScope(Projet projet) {
-        Long sucursalId = entrepriseContextService.getScopeSucursalId();
-        Long entrepriseId = entrepriseContextService.getScopeEntrepriseId();
-        if ((sucursalId != null && (projet.getSucursal() == null || !sucursalId.equals(projet.getSucursal().getId())))
-                || (entrepriseId != null && (projet.getEntreprise() == null || !entrepriseId.equals(projet.getEntreprise().getId()))))
+        if (!projetVisiblePourUtilisateur(projet))
             throw new ResourceNotFoundException("Projet non trouvé");
+    }
+
+    private boolean projetVisiblePourUtilisateur(Projet projet) {
+        Employer current = entrepriseContextService.getCurrentEmployer();
+        if (current == null) return false;
+        String role = current.getRole() != null ? current.getRole().getName() : "";
+        if ("SUPER_ADMIN".equals(role)) return false;
+        if (current.getEntreprise() == null || projet.getEntreprise() == null
+                || !current.getEntreprise().getId().equals(projet.getEntreprise().getId())) return false;
+
+        Long scopeSucursal = entrepriseContextService.getScopeSucursalId();
+        if (scopeSucursal != null && (projet.getSucursal() == null
+                || !scopeSucursal.equals(projet.getSucursal().getId()))) return false;
+        if ("SECRETAIRE".equals(role) && (current.getSucursal() == null || projet.getSucursal() == null
+                || !current.getSucursal().getId().equals(projet.getSucursal().getId()))) return false;
+
+        if ("LEAD".equals(role)) {
+            List<Long> departements = entrepriseContextService.getScopeDepartementIds();
+            if (!departements.isEmpty() && (projet.getDepartements() == null || projet.getDepartements().stream()
+                    .noneMatch(d -> departements.contains(d.getId())))) return false;
+        }
+        if ("STAFF".equals(role) || "STAGIAIRE".equals(role)) {
+            boolean membre = projet.getMembres() != null && projet.getMembres().stream()
+                    .anyMatch(e -> current.getId().equals(e.getId()));
+            boolean chef = projet.getChefProjet() != null && current.getId().equals(projet.getChefProjet().getId());
+            if (!membre && !chef) return false;
+        }
+        return true;
+    }
+
+    private void verifierGestionProjet(Projet projet) {
+        verifierRoleGestion();
+        verifierLectureScope(projet);
+    }
+
+    private void verifierRoleGestion() {
+        Employer current = entrepriseContextService.getCurrentEmployer();
+        String role = current != null && current.getRole() != null ? current.getRole().getName() : "";
+        if (!List.of("ADMIN", "MANAGER", "LEAD").contains(role))
+            throw new org.springframework.security.access.AccessDeniedException("La gestion des projets est réservée aux rôles ADMIN, MANAGER et LEAD.");
+    }
+
+    private void verifierRelationsProjet(Projet projet) {
+        Employer current = entrepriseContextService.getCurrentEmployer();
+        if (current == null || current.getEntreprise() == null || projet.getEntreprise() == null
+                || !current.getEntreprise().getId().equals(projet.getEntreprise().getId()))
+            throw new org.springframework.security.access.AccessDeniedException("Le projet et ses rattachements doivent appartenir à votre entreprise.");
+        Long scopeSucursal = entrepriseContextService.getScopeSucursalId();
+        if (scopeSucursal != null && (projet.getSucursal() == null || !scopeSucursal.equals(projet.getSucursal().getId())))
+            throw new org.springframework.security.access.AccessDeniedException("Le projet doit rester dans votre succursale.");
+
+        if (projet.getChefProjet() != null) verifierEmployeReference(projet.getChefProjet(), current, "chef de projet");
+        if (projet.getMembres() != null) projet.getMembres().forEach(m -> verifierEmployeReference(m, current, "membre"));
+        if (projet.getDepartements() != null) {
+            List<Long> departementsLead = entrepriseContextService.getScopeDepartementIds();
+            for (Departement d : projet.getDepartements()) {
+                if (d.getEntreprise() == null || !current.getEntreprise().getId().equals(d.getEntreprise().getId()))
+                    throw new org.springframework.security.access.AccessDeniedException("Un département du projet est hors de votre entreprise.");
+                if (entrepriseContextService.isLead() && (!departementsLead.contains(d.getId())))
+                    throw new org.springframework.security.access.AccessDeniedException("Un département du projet est hors de votre périmètre.");
+            }
+        }
+        if (entrepriseContextService.isLead()) {
+            List<Long> ids = entrepriseContextService.getScopeDepartementIds();
+            if (ids.isEmpty() || projet.getDepartements() == null || projet.getDepartements().stream().noneMatch(d -> ids.contains(d.getId())))
+                throw new org.springframework.security.access.AccessDeniedException("Un LEAD doit rattacher le projet à l'un de ses départements supervisés.");
+        }
+    }
+
+    private void verifierEmployeReference(Employer cible, Employer current, String usage) {
+        if (current == null || current.getEntreprise() == null || cible.getEntreprise() == null
+                || !current.getEntreprise().getId().equals(cible.getEntreprise().getId()))
+            throw new org.springframework.security.access.AccessDeniedException("Le " + usage + " doit appartenir à votre entreprise.");
+        Long sucursalScope = entrepriseContextService.getScopeSucursalId();
+        if (sucursalScope != null && (cible.getSucursal() == null || !sucursalScope.equals(cible.getSucursal().getId())))
+            throw new org.springframework.security.access.AccessDeniedException("Le " + usage + " doit appartenir à votre succursale.");
+        if (entrepriseContextService.isLead() && !entrepriseContextService.employeDansLePerimetre(cible.getId()))
+            throw new org.springframework.security.access.AccessDeniedException("Le " + usage + " doit appartenir à l'un de vos départements supervisés.");
+    }
+
+    private void verifierDepartementReference(Departement departement) {
+        Employer current = entrepriseContextService.getCurrentEmployer();
+        if (current == null || current.getEntreprise() == null || departement.getEntreprise() == null
+                || !current.getEntreprise().getId().equals(departement.getEntreprise().getId()))
+            throw new org.springframework.security.access.AccessDeniedException("Le département doit appartenir à votre entreprise.");
+        if (entrepriseContextService.isLead() && !entrepriseContextService.getScopeDepartementIds().contains(departement.getId()))
+            throw new org.springframework.security.access.AccessDeniedException("Le département est hors de votre périmètre.");
     }
 
     private void appliquerScopeCreation(Projet projet, ProjetRequestDTO dto) {
@@ -130,10 +216,10 @@ public class ProjetService {
 
     @Transactional
     public void delete(Long id) {
-        if (!projetRepository.existsById(id)) {
-            throw new ResourceNotFoundException("Projet non trouvé : " + id);
-        }
-        projetRepository.deleteById(id);
+        Projet projet = projetRepository.findById(id)
+                .orElseThrow(() -> new ResourceNotFoundException("Projet non trouvé : " + id));
+        verifierGestionProjet(projet);
+        projetRepository.delete(projet);
         log.info("Projet supprimé : {}", id);
     }
 
@@ -141,6 +227,7 @@ public class ProjetService {
     public ProjetResponseDTO updateStatut(Long id, Projet.StatutProjet statut) {
         Projet projet = projetRepository.findById(id)
                 .orElseThrow(() -> new ResourceNotFoundException("Projet non trouvé : " + id));
+        verifierGestionProjet(projet);
         projet.setStatut(statut);
         if (statut == Projet.StatutProjet.TERMINE && projet.getDateFinReelle() == null) {
             projet.setDateFinReelle(LocalDate.now());
@@ -152,8 +239,10 @@ public class ProjetService {
     public ProjetResponseDTO addMembre(Long projetId, Long membreId) {
         Projet projet = projetRepository.findById(projetId)
                 .orElseThrow(() -> new ResourceNotFoundException("Projet non trouvé : " + projetId));
+        verifierGestionProjet(projet);
         Employer membre = employerRepository.findById(membreId)
                 .orElseThrow(() -> new ResourceNotFoundException("Membre non trouvé : " + membreId));
+        verifierEmployeReference(membre, entrepriseContextService.getCurrentEmployer(), "membre");
         projet.addMembre(membre);
         return enrichAndMap(projetRepository.save(projet));
     }
@@ -162,8 +251,10 @@ public class ProjetService {
     public ProjetResponseDTO removeMembre(Long projetId, Long membreId) {
         Projet projet = projetRepository.findById(projetId)
                 .orElseThrow(() -> new ResourceNotFoundException("Projet non trouvé : " + projetId));
+        verifierGestionProjet(projet);
         Employer membre = employerRepository.findById(membreId)
                 .orElseThrow(() -> new ResourceNotFoundException("Membre non trouvé : " + membreId));
+        verifierEmployeReference(membre, entrepriseContextService.getCurrentEmployer(), "membre");
         projet.removeMembre(membre);
         return enrichAndMap(projetRepository.save(projet));
     }
@@ -172,8 +263,10 @@ public class ProjetService {
     public ProjetResponseDTO addDepartement(Long projetId, Long deptId) {
         Projet projet = projetRepository.findById(projetId)
                 .orElseThrow(() -> new ResourceNotFoundException("Projet non trouvé : " + projetId));
+        verifierGestionProjet(projet);
         Departement dept = departementRepository.findById(deptId)
                 .orElseThrow(() -> new ResourceNotFoundException("Département non trouvé : " + deptId));
+        verifierDepartementReference(dept);
         projet.addDepartement(dept);
         return enrichAndMap(projetRepository.save(projet));
     }
@@ -182,32 +275,29 @@ public class ProjetService {
     public ProjetResponseDTO removeDepartement(Long projetId, Long deptId) {
         Projet projet = projetRepository.findById(projetId)
                 .orElseThrow(() -> new ResourceNotFoundException("Projet non trouvé : " + projetId));
+        verifierGestionProjet(projet);
         Departement dept = departementRepository.findById(deptId)
                 .orElseThrow(() -> new ResourceNotFoundException("Département non trouvé : " + deptId));
+        verifierDepartementReference(dept);
         projet.removeDepartement(dept);
         return enrichAndMap(projetRepository.save(projet));
     }
 
     // CORRECTION : méthode manquante appelée depuis ProjetController
+    @Transactional(readOnly = true)
     public List<ProjetResponseDTO> findByDepartement(Long departementId) {
         return projetRepository.findByDepartementId(departementId).stream()
-                .filter(this::dansScope)
+                .filter(this::projetVisiblePourUtilisateur)
                 .map(this::enrichAndMap)
                 .collect(Collectors.toList());
     }
 
     // CORRECTION : méthode manquante appelée depuis ProjetController
+    @Transactional(readOnly = true)
     public List<ProjetResponseDTO> findProjetsEnRetard() {
         return projetRepository.findByDateFinPrevueBeforeAndStatutNot(
                         LocalDate.now(), Projet.StatutProjet.TERMINE)
-                .stream().filter(this::dansScope).map(this::enrichAndMap).collect(Collectors.toList());
-    }
-
-    private boolean dansScope(Projet projet) {
-        Long suc = entrepriseContextService.getScopeSucursalId();
-        Long ent = entrepriseContextService.getScopeEntrepriseId();
-        return (suc == null || (projet.getSucursal() != null && suc.equals(projet.getSucursal().getId())))
-                && (ent == null || (projet.getEntreprise() != null && ent.equals(projet.getEntreprise().getId())));
+                .stream().filter(this::projetVisiblePourUtilisateur).map(this::enrichAndMap).collect(Collectors.toList());
     }
 
     // ─── Dashboard ────────────────────────────────────────────
@@ -215,25 +305,40 @@ public class ProjetService {
     // CORRECTION : méthodes manquantes appelées depuis ProjetController
     @Transactional(readOnly = true)
     public ProjetDashboardDTO getGlobalDashboardStats() {
+        List<Projet> visibles = projetRepository.findAll().stream().filter(this::projetVisiblePourUtilisateur).toList();
+        java.math.BigDecimal budgetAlloue = visibles.stream().map(Projet::getBudgetAlloue)
+                .filter(java.util.Objects::nonNull).reduce(java.math.BigDecimal.ZERO, java.math.BigDecimal::add);
+        java.math.BigDecimal budgetConsomme = visibles.stream().map(Projet::getBudgetConsomme)
+                .filter(java.util.Objects::nonNull).reduce(java.math.BigDecimal.ZERO, java.math.BigDecimal::add);
+        List<Tache> tachesVisibles = visibles.stream().flatMap(p -> tachesVisiblesProjet(p.getId()).stream()).toList();
+        String role = entrepriseContextService.currentRole();
+        boolean canViewFinancial = "ADMIN".equals(role) || "MANAGER".equals(role);
+        long totalTaches = tachesVisibles.size();
+        long terminees = tachesVisibles.stream().filter(t -> t.getStatut() == Tache.StatutTache.TERMINEE).count();
+        long enCours = tachesVisibles.stream().filter(t -> t.getStatut() == Tache.StatutTache.EN_COURS).count();
         return ProjetDashboardDTO.builder()
-                .totalProjets((int) projetRepository.count())
-                .projetsEnCours((int) projetRepository.countByStatut(Projet.StatutProjet.EN_COURS))
-                .projetsTermines((int) projetRepository.countByStatut(Projet.StatutProjet.TERMINE))
-                .projetsEnRetard((int) projetRepository.countByStatut(Projet.StatutProjet.EN_RETARD))
-                .projetsPlanifies((int) projetRepository.countByStatut(Projet.StatutProjet.PLANIFIE))
-                .projetsSuspendus((int) projetRepository.countByStatut(Projet.StatutProjet.SUSPENDU))
-                .projetsAnnules((int) projetRepository.countByStatut(Projet.StatutProjet.ANNULE))
-                .budgetTotalAlloue(projetRepository.sumBudgetAlloue())
-                .budgetTotalConsomme(projetRepository.sumBudgetConsomme())
-                .totalTaches((int) projetRepository.countTotalTaches())
-                .tachesTerminees((int) projetRepository.countTachesByStatut(Tache.StatutTache.TERMINEE))
-                .tachesEnCours((int) projetRepository.countTachesByStatut(Tache.StatutTache.EN_COURS))
+                .totalProjets(visibles.size())
+                .projetsEnCours((int) visibles.stream().filter(p -> p.getStatut() == Projet.StatutProjet.EN_COURS).count())
+                .projetsTermines((int) visibles.stream().filter(p -> p.getStatut() == Projet.StatutProjet.TERMINE).count())
+                .projetsEnRetard((int) visibles.stream().filter(p -> p.getStatut() == Projet.StatutProjet.EN_RETARD).count())
+                .projetsPlanifies((int) visibles.stream().filter(p -> p.getStatut() == Projet.StatutProjet.PLANIFIE).count())
+                .projetsSuspendus((int) visibles.stream().filter(p -> p.getStatut() == Projet.StatutProjet.SUSPENDU).count())
+                .projetsAnnules((int) visibles.stream().filter(p -> p.getStatut() == Projet.StatutProjet.ANNULE).count())
+                .budgetTotalAlloue(canViewFinancial ? budgetAlloue : null)
+                .budgetTotalConsomme(canViewFinancial ? budgetConsomme : null)
+                .totalTaches((int) totalTaches)
+                .tachesTerminees((int) terminees)
+                .tachesEnCours((int) enCours)
                 .build();
     }
 
+    @Transactional(readOnly = true)
     public ProjetDashboardDTO.ProjetDetailView getProjetDashboardStats(Long id) {
         Projet projet = projetRepository.findByIdWithMembres(id)
                 .orElseThrow(() -> new ResourceNotFoundException("Projet non trouvé : " + id));
+        verifierLectureScope(projet);
+        List<Tache> taches = tachesVisiblesProjet(id);
+        ProjetResponseDTO scopedProject = enrichAndMap(projet);
         return ProjetDashboardDTO.ProjetDetailView.builder()
                 .id(projet.getId())
                 .nom(projet.getNom())
@@ -242,19 +347,21 @@ public class ProjetService {
                 .dateDebut(projet.getDateDebut())
                 .dateFinPrevue(projet.getDateFinPrevue())
                 .progression(projet.getProgression())
-                .totalTaches((int) tacheRepository.countByProjetId(id))
-                .tachesTerminees((int) tacheRepository.countByProjetIdAndStatut(id, Tache.StatutTache.TERMINEE))
-                .tachesEnCours((int) tacheRepository.countByProjetIdAndStatut(id, Tache.StatutTache.EN_COURS))
-                .nombreMembres(projet.getMembres().size())
-                .chefProjetId(projet.getChefProjet() != null ? projet.getChefProjet().getId() : null)
-                .chefProjetNom(projet.getChefProjet() != null ? projet.getChefProjet().getName() : null)
+                .totalTaches(taches.size())
+                .tachesTerminees((int) taches.stream().filter(t -> t.getStatut() == Tache.StatutTache.TERMINEE).count())
+                .tachesEnCours((int) taches.stream().filter(t -> t.getStatut() == Tache.StatutTache.EN_COURS).count())
+                .nombreMembres(scopedProject.getNombreMembres().intValue())
+                .chefProjetId(scopedProject.getChefProjet() != null ? scopedProject.getChefProjet().getId() : null)
+                .chefProjetNom(scopedProject.getChefProjet() != null ? scopedProject.getChefProjet().getName() : null)
                 .build();
     }
 
+    @Transactional(readOnly = true)
     public List<ProjetDashboardDTO.StatutStatDTO> getStatistiquesParStatut() {
-        long total = projetRepository.count();
+        List<Projet> visibles = projetRepository.findAll().stream().filter(this::projetVisiblePourUtilisateur).toList();
+        long total = visibles.size();
         return Arrays.stream(Projet.StatutProjet.values()).map(statut -> {
-            long count = projetRepository.countByStatut(statut);
+            long count = visibles.stream().filter(p -> p.getStatut() == statut).count();
             return ProjetDashboardDTO.StatutStatDTO.builder()
                     .statut(statut)
                     .libelle(statut.name())
@@ -264,9 +371,22 @@ public class ProjetService {
         }).collect(Collectors.toList());
     }
 
+    @Transactional(readOnly = true)
     public ProjetDashboardDTO.BudgetGlobalDTO getStatistiquesBudget() {
-        var alloue  = projetRepository.sumBudgetAlloue();
-        var consomme = projetRepository.sumBudgetConsomme();
+        List<Projet> visibles = projetRepository.findAll().stream().filter(this::projetVisiblePourUtilisateur).toList();
+        String role = entrepriseContextService.currentRole();
+        if (!"ADMIN".equals(role) && !"MANAGER".equals(role)) {
+            return ProjetDashboardDTO.BudgetGlobalDTO.builder()
+                    .totalAlloue(java.math.BigDecimal.ZERO)
+                    .totalConsomme(java.math.BigDecimal.ZERO)
+                    .totalRestant(java.math.BigDecimal.ZERO)
+                    .tauxConsommation(0.0)
+                    .build();
+        }
+        var alloue = visibles.stream().map(Projet::getBudgetAlloue).filter(java.util.Objects::nonNull)
+                .reduce(java.math.BigDecimal.ZERO, java.math.BigDecimal::add);
+        var consomme = visibles.stream().map(Projet::getBudgetConsomme).filter(java.util.Objects::nonNull)
+                .reduce(java.math.BigDecimal.ZERO, java.math.BigDecimal::add);
         var restant = alloue != null && consomme != null
                 ? alloue.subtract(consomme) : java.math.BigDecimal.ZERO;
         double taux = (alloue != null && alloue.compareTo(java.math.BigDecimal.ZERO) > 0)
@@ -307,16 +427,35 @@ public class ProjetService {
     private ProjetResponseDTO enrichAndMap(Projet projet) {
         ProjetResponseDTO dto = projetMapper.toResponseDTO(projet);
         Employer current = entrepriseContextService.getCurrentEmployer();
-        boolean secretary = current != null && current.getRole() != null
-                && "SECRETAIRE".equals(current.getRole().getName());
+        String role = current != null && current.getRole() != null ? current.getRole().getName() : "";
+        boolean canViewFinancial = "ADMIN".equals(role) || "MANAGER".equals(role);
         Long id = projet.getId();
-        dto.setNombreTaches(tacheRepository.countByProjetId(id));
-        dto.setNombreTachesTerminees(tacheRepository.countByProjetIdAndStatut(id, Tache.StatutTache.TERMINEE));
-        dto.setNombreTachesEnCours(tacheRepository.countByProjetIdAndStatut(id, Tache.StatutTache.EN_COURS));
-        dto.setNombreTachesEnRetard(tacheRepository.countTachesEnRetardByProjetId(id, LocalDate.now(), Tache.StatutTache.TERMINEE));
-        if (secretary) {
-            // The secretary may read project operations, but project DTOs must not
-            // become a side door to invoice totals or financial reporting.
+        List<Tache> tasks = tachesVisiblesProjet(id);
+        dto.setNombreTaches((long) tasks.size());
+        dto.setNombreTachesTerminees(tasks.stream().filter(t -> t.getStatut() == Tache.StatutTache.TERMINEE).count());
+        dto.setNombreTachesEnCours(tasks.stream().filter(t -> t.getStatut() == Tache.StatutTache.EN_COURS).count());
+        dto.setNombreTachesEnRetard(tasks.stream().filter(t -> t.getDateEcheance() != null
+                && t.getDateEcheance().isBefore(LocalDate.now()) && t.getStatut() != Tache.StatutTache.TERMINEE).count());
+
+        Long branchScope = entrepriseContextService.getScopeSucursalId();
+        if (branchScope != null && dto.getMembres() != null) {
+            dto.setMembres(dto.getMembres().stream().filter(m -> branchScope.equals(m.getSucursalId()))
+                    .collect(Collectors.toSet()));
+            if (dto.getChefProjet() != null && !branchScope.equals(dto.getChefProjet().getSucursalId())) dto.setChefProjet(null);
+        }
+        if ("LEAD".equals(role)) {
+            List<Long> departments = entrepriseContextService.getScopeDepartementIds();
+            if (!departments.isEmpty()) {
+                if (dto.getDepartements() != null) dto.setDepartements(dto.getDepartements().stream()
+                        .filter(d -> departments.contains(d.getId())).collect(Collectors.toSet()));
+                if (dto.getMembres() != null) dto.setMembres(dto.getMembres().stream()
+                        .filter(m -> departments.contains(m.getDepartementId())).collect(Collectors.toSet()));
+                if (dto.getChefProjet() != null && !departments.contains(dto.getChefProjet().getDepartementId())) dto.setChefProjet(null);
+            }
+        }
+        dto.setNombreMembres((long) (dto.getMembres() == null ? 0 : dto.getMembres().size()));
+        dto.setNombreDepartements((long) (dto.getDepartements() == null ? 0 : dto.getDepartements().size()));
+        if (!canViewFinancial) {
             dto.setBudgetAlloue(null);
             dto.setBudgetConsomme(null);
             dto.setBudgetRestant(null);
@@ -332,13 +471,17 @@ public class ProjetService {
             dto.setMontantTotalFactures(factureRepository.sumMontantTTCByProjetId(id));
             dto.setMontantPayeFactures(factureRepository.sumMontantPayeByProjetId(id));
         }
-        dto.setNombreMembres((long) projet.getMembres().size());
-        dto.setNombreDepartements((long) projet.getDepartements().size());
         if (projet.getDateFinPrevue() != null) {
             long jours = ChronoUnit.DAYS.between(LocalDate.now(), projet.getDateFinPrevue());
             dto.setJoursRestants(jours);
             dto.setEstEnRetard(jours < 0 && projet.getStatut() != Projet.StatutProjet.TERMINE);
         }
         return dto;
+    }
+
+    private List<Tache> tachesVisiblesProjet(Long projetId) {
+        Employer current = entrepriseContextService.getCurrentEmployer();
+        return tacheRepository.findByProjetIdWithScopeRelations(projetId).stream()
+                .filter(t -> tacheAccessService.peutVoir(t, current)).toList();
     }
 }

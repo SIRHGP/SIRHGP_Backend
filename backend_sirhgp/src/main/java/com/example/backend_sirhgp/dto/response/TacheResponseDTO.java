@@ -27,10 +27,14 @@ public class TacheResponseDTO {
     private LocalDateTime dateModification;
 
     private ProjetResponseDTO.EmployerSummaryDTO assignee;
+    private Long assigneeId;
     private ProjetResponseDTO.EmployerSummaryDTO createur;
+    private Long createurId;
     private ProjetSummaryDTO projet;
     private Long projetId;
     private Long sucursalId;
+    private String sucursalNom;
+    private Tache.Visibilite visibilite;
 
     private Long nombreCommentaires;
     // CORRECTION : List (ordonné) au lieu de Set (non ordonné)

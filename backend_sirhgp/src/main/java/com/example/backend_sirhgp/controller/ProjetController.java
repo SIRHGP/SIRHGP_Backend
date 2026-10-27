@@ -131,6 +131,7 @@ public class ProjetController {
     @GetMapping("/{projetId}/factures")
     public ResponseEntity<ApiResponse<List<FactureResponseDTO>>> getFactures(
             @PathVariable Long projetId) {
+        projetService.findById(projetId); // valide l'entreprise et la succursale avant la lecture des factures
         return ResponseEntity.ok(
                 new ApiResponse<>(true, "Factures du projet récupérées",
                         factureService.findByProjetId(projetId)));
