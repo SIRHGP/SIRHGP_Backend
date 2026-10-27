@@ -36,6 +36,15 @@ public class DocumentController {
                         documentService.uploadWithDispatch(dto, fichier)));
     }
 
+    /** Dedicated upload for Timesheet permission attachments; the recipient is resolved from the logged-in role. */
+    @PostMapping(value = "/permission-justificatif", consumes = MediaType.MULTIPART_FORM_DATA_VALUE)
+    public ResponseEntity<ApiResponse<DocumentResponseDTO>> uploadPermissionJustificatif(
+            @RequestParam(required = false) String nom,
+            @RequestPart("fichier") MultipartFile fichier) throws IOException {
+        return ResponseEntity.status(201).body(new ApiResponse<>(true, "Justificatif téléversé avec succès",
+                documentService.uploadPermissionJustificatif(nom, fichier)));
+    }
+
     // ─── Upload simplifié (alias) ─────────────────────────────────────────────
     @PostMapping(consumes = MediaType.MULTIPART_FORM_DATA_VALUE)
     public ResponseEntity<ApiResponse<DocumentResponseDTO>> uploadDocument(

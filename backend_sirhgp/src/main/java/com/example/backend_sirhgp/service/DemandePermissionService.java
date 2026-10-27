@@ -5,14 +5,11 @@ import com.example.backend_sirhgp.dto.request.DemandePermissionRequestDTO;
 import com.example.backend_sirhgp.dto.response.DemandePermissionResponseDTO;
 import com.example.backend_sirhgp.exception.ResourceNotFoundException;
 import com.example.backend_sirhgp.model.DemandePermission;
-import com.example.backend_sirhgp.model.Departement;
 import com.example.backend_sirhgp.model.Document;
 import com.example.backend_sirhgp.model.Employer;
 import com.example.backend_sirhgp.model.Entreprise;
 import com.example.backend_sirhgp.repository.DemandePermissionRepository;
-import com.example.backend_sirhgp.repository.DepartementRepository;
 import com.example.backend_sirhgp.repository.DocumentRepository;
-import com.example.backend_sirhgp.repository.EmployerRepository;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.security.access.AccessDeniedException;
@@ -41,8 +38,7 @@ import java.util.List;
 public class DemandePermissionService {
 
     private final DemandePermissionRepository permissionRepository;
-    private final EmployerRepository employerRepository;
-    private final DepartementRepository departementRepository;
+    private final PermissionApproverResolver approverResolver;
     private final DocumentRepository documentRepository;
     private final EntrepriseContextService entrepriseContextService;
     private final AuditLogService auditLogService;
@@ -74,7 +70,7 @@ public class DemandePermissionService {
             justificatifNom = doc.getNom();
         }
 
-        Employer valideur = resoudreValideur(demandeur);
+        Employer valideur = approverResolver.resolve(demandeur);
 
         DemandePermission perm = DemandePermission.builder()
                 .type(dto.getType())
@@ -215,92 +211,6 @@ public class DemandePermissionService {
      * LEAD → MANAGER de l'entreprise ; MANAGER → ADMIN ; ADMIN/SUPER_ADMIN → null.
      * Repli vers l'ADMIN de l'entreprise si le maillon est manquant,
      * et jamais l'employé lui-même (interdiction d'auto-validation).
-     */
-    private Employer resoudreValideur(Employer demandeur) {
-        String role = demandeur.getRole() != null ? demandeur.getRole().getName() : null;
-        Long entrepriseId = demandeur.getEntreprise() != null ? demandeur.getEntreprise().getId() : null;
-
-        Employer candidat = switch (role == null ? "" : role) {
-            case "SECRETAIRE" -> managerDeSucursal(demandeur);
-            case "STAFF", "STAGIAIRE" -> superviseurDeDepartement(demandeur);
-            case "LEAD" -> premierActif(entrepriseId != null
-                    ? employerRepository.findManagersActifsByEntrepriseId(entrepriseId)
-                    : employerRepository.findAllManagersActifs());
-            case "MANAGER" -> premierActif(entrepriseId != null
-                    ? employerRepository.findAdminsByEntrepriseId(entrepriseId)
-                    : List.<Employer>of());
-            default -> null; // ADMIN / SUPER_ADMIN : sans valideur dédié
-        };
-
-        // Repli : ADMIN de l'entreprise (pour STAFF/STAGIAIRE/LEAD/MANAGER sans maillon)
-        if (candidat == null && entrepriseId != null
-                && !"ADMIN".equals(role) && !"SUPER_ADMIN".equals(role)) {
-            candidat = employerRepository.findAdminsByEntrepriseId(entrepriseId).stream()
-                    .filter(a -> !a.getId().equals(demandeur.getId()))
-                    .findFirst().orElse(null);
-        }
-        // Ultime garde-fou : jamais auto-validation
-        if (candidat != null && candidat.getId().equals(demandeur.getId())) return null;
-        return candidat;
-    }
-
-    private Employer managerDeSucursal(Employer demandeur) {
-        if (demandeur.getSucursal() == null || demandeur.getSucursal().getManager() == null) return null;
-        Employer manager = employerRepository.findByIdWithDetails(demandeur.getSucursal().getManager().getId()).orElse(null);
-        if (manager == null || !manager.isActif() || manager.getRole() == null
-                || !"MANAGER".equals(manager.getRole().getName())) return null;
-        if (manager.getEntreprise() == null || demandeur.getEntreprise() == null
-                || !manager.getEntreprise().getId().equals(demandeur.getEntreprise().getId())) return null;
-        if (manager.getSucursal() == null || !manager.getSucursal().getId().equals(demandeur.getSucursal().getId())) return null;
-        return manager;
-    }
-
-    /**
-     * Chef de département (superviseur LEAD actif) du département de l'employé, via son poste.
-     *
-     * Refonte routage — FILTRE SCOPE : le superviseur retenu doit être actif,
-     * porter le rôle LEAD (ou ADMIN), appartenir à la MÊME ENTREPRISE que le
-     * demandeur et, si le demandeur est rattaché à une SUCURSALE, à la MÊME
-     * succursale. Cela évite d'attribuer une demande à un valideur d'une autre
-     * entité/agence (cloisonnement multi-tenant + scope succursale).
-     */
-    private Employer superviseurDeDepartement(Employer demandeur) {
-        if (demandeur.getPoste() == null || demandeur.getPoste().getDepartement() == null) return null;
-        Long departementId = demandeur.getPoste().getDepartement().getId();
-        Departement dep = departementRepository.findById(departementId).orElse(null);
-        if (dep == null || dep.getSuperviseur() == null) return null;
-        Employer sup = employerRepository.findByIdWithDetails(dep.getSuperviseur().getId()).orElse(null);
-        if (sup == null || !sup.isActif()) return null;
-
-        // Rôle du valideur : LEAD (chef de département) ou ADMIN (repli supérieur).
-        String supRole = sup.getRole() != null ? sup.getRole().getName() : null;
-        if (!"LEAD".equals(supRole) && !"ADMIN".equals(supRole)) return null;
-
-        // Cloisonnement ENTREPRISE : même tenant que le demandeur.
-        Long supEntId = sup.getEntreprise() != null ? sup.getEntreprise().getId() : null;
-        Long demEntId = demandeur.getEntreprise() != null ? demandeur.getEntreprise().getId() : null;
-        if (demEntId != null && supEntId != null && !demEntId.equals(supEntId)) return null;
-
-        // Scope SUCURSALE : si le demandeur est rattaché à une agence, le valideur
-        // doit l'être aussi (même agence). Un valideur sans agence (siège) reste
-        // acceptable pour un demandeur scopé — repli sur l'entreprise.
-        Long demSucId = demandeur.getSucursal() != null ? demandeur.getSucursal().getId() : null;
-        if (demSucId != null && sup.getSucursal() != null) {
-            Long supSucId = sup.getSucursal().getId();
-            if (supSucId != null && !demSucId.equals(supSucId)) return null;
-        }
-
-        return sup;
-    }
-
-    private Employer premierActif(List<Employer> candidats) {
-        return candidats != null ? candidats.stream().findFirst().orElse(null) : null;
-    }
-
-    /**
-     * Peut décider : le valideur snapshoté, ou un ADMIN du même tenant,
-     * ou un SUPER_ADMIN. La branche MANAGER est supprimée (hiérarchie stricte
-     * : un MANAGER qui n'est pas le valideur snapshoté ne peut pas décider).
      */
     private boolean peutDecider(Employer current, DemandePermission perm) {
         if (perm.getValideurId() != null && perm.getValideurId().equals(current.getId())) return true;

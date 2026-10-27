@@ -44,6 +44,7 @@ public class DocumentService {
     private final ProjetRepository projetRepository;
     private final DocumentMapper documentMapper;
     private final ApplicationEventPublisher eventPublisher;
+    private final PermissionApproverResolver permissionApproverResolver;
 
     @Value("${app.upload.dir:uploads}")
     private String uploadDir;
@@ -155,6 +156,48 @@ public class DocumentService {
         log.info("Document '{}' uploadé et dispatché par {} → {}",
                 saved.getNom(), expediteur.getEmail(), destinataire.getEmail());
 
+        return documentMapper.toResponseDTO(saved);
+    }
+
+    /** Upload a Timesheet permission attachment and route it to the role-chain approver. */
+    @Transactional
+    public DocumentResponseDTO uploadPermissionJustificatif(String nom, MultipartFile fichier) throws IOException {
+        Employer expediteur = getCurrentUser();
+        validateFile(fichier);
+
+        Employer destinataire = permissionApproverResolver.resolve(expediteur);
+        DocumentScope scope = buildScope(expediteur);
+        if (destinataire != null) {
+            if (isSuperAdmin(destinataire)) {
+                throw new IllegalArgumentException("Impossible d'envoyer un justificatif au Super Administrateur");
+            }
+            verifierEmployeDansScope(scope, destinataire);
+        }
+
+        Path filePath = savePhysicalFile(fichier);
+        Document document = Document.builder()
+                .nom(nom == null || nom.isBlank() ? "Justificatif de permission" : nom.trim())
+                .description("Justificatif joint à une demande de permission")
+                .type(Document.TypeDocument.AUTRE)
+                .publique(false)
+                .nomFichier(filePath.getFileName().toString())
+                .cheminStockage(filePath.toAbsolutePath().toString())
+                .typeMime(fichier.getContentType())
+                .taille(fichier.getSize())
+                .expediteur(expediteur)
+                .employer(expediteur)
+                .destinataire(destinataire)
+                .dateEnvoi(destinataire != null ? LocalDateTime.now() : null)
+                .nombreTelechargements(0L)
+                .status(DocumentStatus.ACTIF)
+                .build();
+
+        Document saved = documentRepository.save(document);
+        if (destinataire != null) {
+            eventPublisher.publishEvent(new DocumentDispatchedEvent(this, saved, expediteur, destinataire, null));
+        }
+        log.info("Justificatif de permission '{}' téléversé par {}{}", saved.getNom(), expediteur.getEmail(),
+                destinataire != null ? " → " + destinataire.getEmail() : " (aucun valideur dédié)");
         return documentMapper.toResponseDTO(saved);
     }
 
