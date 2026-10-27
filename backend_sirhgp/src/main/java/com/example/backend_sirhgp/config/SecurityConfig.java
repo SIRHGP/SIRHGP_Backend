@@ -124,7 +124,7 @@ public class SecurityConfig {
                         // Routes documents - CORRECTION IMPORTANTE
                         // Ne pas utiliser de double wildcard mal placé
                         .requestMatchers("/api/documents/download/**").authenticated()
-                        .requestMatchers("/api/documents/**").hasAnyRole("SUPER_ADMIN", "ADMIN", "MANAGER", "LEAD", "STAFF", "SECRETAIRE")
+                        .requestMatchers("/api/documents/**").hasAnyRole("SUPER_ADMIN", "ADMIN", "MANAGER", "LEAD", "STAFF", "STAGIAIRE", "SECRETAIRE")
 
                         .requestMatchers("/api/secretariat/**").hasRole("SECRETAIRE")
                         .requestMatchers("/api/factures/**", "/api/facturation-cycles/**").hasAnyRole("ADMIN", "MANAGER")
