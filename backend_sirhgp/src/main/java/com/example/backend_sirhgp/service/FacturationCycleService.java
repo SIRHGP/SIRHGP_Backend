@@ -393,8 +393,12 @@ public class FacturationCycleService {
         f.setTitre(dto.getTitre());
         f.setDescription(dto.getDescription());
         f.setDateEmission(dto.getDateEmission());
+        // Les documents du cycle ne demandent pas d'échéance. Fournir une valeur
+        // cohérente évite les colonnes date_echeance NOT NULL des schémas existants.
+        f.setDateEcheance(dto.getDateEmission() != null ? dto.getDateEmission().plusDays(30) : null);
         f.setModule(dto.getModule());
         f.setTauxTVA(dto.getTauxTVA() != null ? dto.getTauxTVA() : new BigDecimal("19.25"));
+        f.setMontantTVA(BigDecimal.ZERO);
         // OHADA contextualisé : facturation interne (client du groupe) => pas de TVA.
         f.setAssujettiTVA(dto.getAssujettiTVA() != null ? dto.getAssujettiTVA() : cycle.getClient() == null);
         f.setTypeFacture(type);
@@ -404,7 +408,10 @@ public class FacturationCycleService {
         f.setNomFournisseur(cycle.getSens() == Facture.SensFacture.ACHAT ? cycle.getNomFournisseur() : null);
         f.setFactureOrigineId(origineId);
         f.setLignesFacture(dto.getLignesFacture());
-        f.setMontantHT(dto.getMontantHT());
+        BigDecimal montantHT = dto.getLignesFacture().stream()
+                .map(l -> l.getPrixUnitaire().multiply(BigDecimal.valueOf(l.getQuantite())))
+                .reduce(BigDecimal.ZERO, BigDecimal::add);
+        f.setMontantHT(montantHT);
         return f;
     }
 

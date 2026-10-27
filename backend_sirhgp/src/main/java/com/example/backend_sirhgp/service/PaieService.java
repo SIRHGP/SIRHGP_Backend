@@ -181,13 +181,24 @@ public class PaieService {
     @Transactional(readOnly = true)
     public List<PaieHeuresDTO> getHeuresEntreprise(Integer mois, Integer annee) {
         Entreprise entreprise = entrepriseContextService.getEntrepriseOfCurrentUser();
-        List<Employer> employes = entreprise != null
+        String role = entrepriseContextService.currentRole();
+        if ("MANAGER".equals(role) && entrepriseContextService.getScopeSucursalId() == null) {
+            return List.of();
+        }
+        List<Employer> employes = new ArrayList<>(entreprise != null
                 ? employerRepository.findByEntrepriseId(entreprise.getId())
-                : employerRepository.findAll();
-        // Phase 2 - scoping fin : MANAGER/LEAD rattaches a une sucursal supervisent leur equipe uniquement.
+                : ("SUPER_ADMIN".equals(role) ? employerRepository.findAll() : List.of()));
+        // MANAGER : succursale. LEAD : succursale et départements supervisés.
         Long scopeSucursalId = entrepriseContextService.getScopeSucursalId();
         if (scopeSucursalId != null) {
             employes.removeIf(e -> e.getSucursal() == null || !scopeSucursalId.equals(e.getSucursal().getId()));
+        }
+        if ("LEAD".equals(role)) {
+            List<Long> departementIds = entrepriseContextService.getScopeDepartementIds();
+            if (!departementIds.isEmpty()) {
+                employes.removeIf(e -> e.getPoste() == null || e.getPoste().getDepartement() == null
+                        || !departementIds.contains(e.getPoste().getDepartement().getId()));
+            }
         }
         List<PaieHeuresDTO> result = new ArrayList<>();
         for (Employer emp : employes) {
@@ -487,40 +498,61 @@ public class PaieService {
     @Transactional(readOnly = true)
     public Page<BulletinPaieResponseDTO> consulter(Pageable pageable, Long employeId, Integer mois, Integer annee) {
         String role = entrepriseContextService.currentRole();
-        boolean gestion = "ADMIN".equals(role) || "MANAGER".equals(role) || "LEAD".equals(role);
+        boolean gestion = "SUPER_ADMIN".equals(role) || "ADMIN".equals(role)
+                || "MANAGER".equals(role) || "LEAD".equals(role);
 
         // Un STAFF / STAGIAIRE ne voit que SES bulletins (lecture seule) — on ignore
         // tout employeId/filtre fourni par le client pour éviter de lire ceux d'autrui.
-        if (!gestion) {
-            Long moi = entrepriseContextService.getCurrentEmployer().getId();
-            employeId = moi;
-            mois = null;
-            annee = null;
-        }
+        final Long employeFiltre = gestion
+                ? employeId
+                : entrepriseContextService.getCurrentEmployer().getId();
+        final Integer moisFiltre = gestion ? mois : null;
+        final Integer anneeFiltre = gestion ? annee : null;
 
         Long scope = entrepriseContextService.getScopeEntrepriseId();
         Long scopeSucursal = entrepriseContextService.getScopeSucursalId();
+        if ("MANAGER".equals(role) && scopeSucursal == null) {
+            throw new org.springframework.security.access.AccessDeniedException(
+                    "Votre compte manager n'est rattaché à aucune succursale.");
+        }
         List<BulletinPaieResponseDTO> list;
-        if (employeId != null) {
+        if (employeFiltre != null) {
+            Employer cible = employerRepository.findById(employeFiltre)
+                    .orElseThrow(() -> new ResourceNotFoundException("Employé non trouvé : " + employeFiltre));
+            verifierAccesEmploye(cible);
             list = bulletinPaieRepository
-                    .findByEmployeIdOrderByAnneeDescMoisDesc(employeId)
-                    .stream().map(bulletinPaieMapper::toResponseDTO).toList();
+                    .findByEmployeIdOrderByAnneeDescMoisDesc(employeFiltre)
+                    .stream()
+                    .filter(b -> moisFiltre == null || b.getMois().equals(moisFiltre))
+                    .filter(b -> anneeFiltre == null || b.getAnnee().equals(anneeFiltre))
+                    .map(bulletinPaieMapper::toResponseDTO).toList();
         } else if (scope != null && scopeSucursal != null) {
             // MANAGER / LEAD ancré à une succursale : que les bulletins de SON agence.
-            list = (mois != null && annee != null)
-                    ? bulletinPaieRepository.findByEntrepriseIdAndSucursalIdAndPeriode(scope, scopeSucursal, mois, annee).stream()
+            list = (moisFiltre != null && anneeFiltre != null)
+                    ? bulletinPaieRepository.findByEntrepriseIdAndSucursalIdAndPeriode(scope, scopeSucursal, moisFiltre, anneeFiltre).stream()
                             .map(bulletinPaieMapper::toResponseDTO).toList()
                     : bulletinPaieRepository.findByEntrepriseIdAndSucursalId(scope, scopeSucursal).stream()
                             .map(bulletinPaieMapper::toResponseDTO).toList();
         } else if (scope != null) {
-            list = (mois != null && annee != null)
-                    ? bulletinPaieRepository.findByEntrepriseIdAndPeriode(scope, mois, annee).stream()
+            list = (moisFiltre != null && anneeFiltre != null)
+                    ? bulletinPaieRepository.findByEntrepriseIdAndPeriode(scope, moisFiltre, anneeFiltre).stream()
                             .map(bulletinPaieMapper::toResponseDTO).toList()
                     : bulletinPaieRepository.findByEntrepriseId(scope).stream()
                             .map(bulletinPaieMapper::toResponseDTO).toList();
-        } else {
+        } else if ("SUPER_ADMIN".equals(role)) {
             list = bulletinPaieRepository.findAll().stream()
                     .map(bulletinPaieMapper::toResponseDTO).toList();
+        } else {
+            list = List.of();
+        }
+        if ("LEAD".equals(role) && employeFiltre == null) {
+            List<Long> departementIds = entrepriseContextService.getScopeDepartementIds();
+            if (!departementIds.isEmpty()) {
+                list = list.stream().filter(b -> {
+                    Long departementId = b.getDepartementId();
+                    return departementId != null && departementIds.contains(departementId);
+                }).toList();
+            }
         }
         return springPage(list, pageable);
     }
@@ -549,14 +581,37 @@ public class PaieService {
      */
     private void verifierAccesEmploye(Employer cible) {
         String role = entrepriseContextService.currentRole();
+        if ("SUPER_ADMIN".equals(role)) return;
         boolean gestion = "ADMIN".equals(role) || "MANAGER".equals(role) || "LEAD".equals(role);
         if (gestion) {
+            Employer courant = entrepriseContextService.getCurrentEmployer();
+            Long entrepriseCouranteId = courant != null && courant.getEntreprise() != null
+                    ? courant.getEntreprise().getId() : null;
+            Long entrepriseCibleId = cible.getEntreprise() != null ? cible.getEntreprise().getId() : null;
+            if (entrepriseCouranteId == null || !entrepriseCouranteId.equals(entrepriseCibleId)) {
+                throw new org.springframework.security.access.AccessDeniedException(
+                        "Cet employé n'appartient pas à votre entreprise.");
+            }
             Long scopeSucursal = entrepriseContextService.getScopeSucursalId();
             if (scopeSucursal != null) {
                 Long sucCible = cible.getSucursal() != null ? cible.getSucursal().getId() : null;
                 if (!scopeSucursal.equals(sucCible)) {
                     throw new org.springframework.security.access.AccessDeniedException(
                             "Cet employé n'appartient pas à votre périmètre (succursale).");
+                }
+            }
+            if ("MANAGER".equals(role) && scopeSucursal == null) {
+                throw new org.springframework.security.access.AccessDeniedException(
+                        "Votre compte manager n'est rattaché à aucune succursale.");
+            }
+            if ("LEAD".equals(role)) {
+                List<Long> departementIds = entrepriseContextService.getScopeDepartementIds();
+                if (!departementIds.isEmpty()) {
+                    Long departementId = entrepriseContextService.getDepartementIdDe(cible.getId());
+                    if (departementId == null || !departementIds.contains(departementId)) {
+                        throw new org.springframework.security.access.AccessDeniedException(
+                                "Cet employé n'appartient pas à vos départements supervisés.");
+                    }
                 }
             }
             return;

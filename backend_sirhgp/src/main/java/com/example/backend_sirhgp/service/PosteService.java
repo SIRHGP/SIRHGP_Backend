@@ -72,6 +72,10 @@ public class PosteService {
                 .build();
 
         resolveRelations(poste, dto.getRoleId(), dto.getDepartementId(), dto.getPermissionIds());
+        if (poste.getDepartement() == null) {
+            throw new IllegalArgumentException("Un département de rattachement est obligatoire.");
+        }
+        verifierDepartement(poste.getDepartement().getId());
 
         poste = posteRepository.save(poste);
         log.info("Poste créé : {}", poste.getName());

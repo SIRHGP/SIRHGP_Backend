@@ -171,7 +171,15 @@ public class DocumentService {
             if (isSuperAdmin(destinataire)) {
                 throw new IllegalArgumentException("Impossible d'envoyer un justificatif au Super Administrateur");
             }
-            verifierEmployeDansScope(scope, destinataire);
+            // Le périmètre de lecture du demandeur (STAFF/STAGIAIRE = soi-même)
+            // ne s'applique pas au valideur choisi par la chaîne d'approbation.
+            // Le resolver sélectionne déjà un valideur de la même entreprise et
+            // du bon maillon; on vérifie ici explicitement l'entreprise seulement.
+            if (scope.entrepriseId() == null || destinataire.getEntreprise() == null
+                    || !Objects.equals(scope.entrepriseId(), destinataire.getEntreprise().getId())) {
+                throw new org.springframework.security.access.AccessDeniedException(
+                        "Le valideur du justificatif doit appartenir à votre entreprise.");
+            }
         }
 
         Path filePath = savePhysicalFile(fichier);
@@ -506,6 +514,10 @@ public class DocumentService {
 
     private boolean hasAccess(DocumentScope scope, Document document) {
         if (scope.superAdmin()) return true;
+        // Un destinataire explicitement désigné peut lire le document qui lui a
+        // été envoyé, même si son périmètre RH habituel ne couvre pas l'expéditeur.
+        if (document.appartientA(scope.userId())
+                && documentBelongsToEntreprise(document, scope.entrepriseId())) return true;
         if (scope.admin()) return documentBelongsToEntreprise(document, scope.entrepriseId());
         if (scope.manager()) {
             if (!documentBelongsToEntreprise(document, scope.entrepriseId())) return false;

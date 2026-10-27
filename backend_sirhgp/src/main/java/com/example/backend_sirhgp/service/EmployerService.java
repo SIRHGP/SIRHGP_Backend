@@ -119,6 +119,14 @@ public class EmployerService {
     }
 
     @Transactional(readOnly = true)
+    public java.util.List<EmployerResponseDTO> findManagers() {
+        Employer current = entrepriseContextService.getCurrentEmployer();
+        if (current == null || current.getEntreprise() == null) return java.util.List.of();
+        return employerRepository.findManagersActifsByEntrepriseId(current.getEntreprise().getId())
+                .stream().map(this::toResponseDTO).toList();
+    }
+
+    @Transactional(readOnly = true)
     public java.util.List<EmployerResponseDTO> findOrganigramme() {
         return employerRepository.findAll().stream()
                 .filter(this::employerDansPerimetre)

@@ -23,6 +23,7 @@ public class DepartementController {
     private final DepartementService departementService;
 
     @PostMapping
+    @PreAuthorize("hasAnyRole('SUPER_ADMIN', 'ADMIN', 'MANAGER')")
     public ResponseEntity<ApiResponse<DepartementResponseDTO>> create(
             @Valid @RequestBody DepartementRequestDTO dto) {
         return ResponseEntity.status(HttpStatus.CREATED)

@@ -38,6 +38,7 @@ public class PosteController {
     }
 
     @PostMapping
+    @PreAuthorize("hasAnyRole('SUPER_ADMIN', 'ADMIN', 'MANAGER')")
     public ResponseEntity<ApiResponse<PosteResponseDTO>> create(
             @Valid @RequestBody PosteRequestDTO dto) {
         return ResponseEntity.status(HttpStatus.CREATED)

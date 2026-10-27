@@ -53,6 +53,12 @@ public class EmployerController {
         return ResponseEntity.ok(new ApiResponse<>(true, "Responsables récupérés", employerService.findLeads()));
     }
 
+    @GetMapping("/managers")
+    @PreAuthorize("hasRole('ADMIN')")
+    public ResponseEntity<ApiResponse<List<EmployerResponseDTO>>> getManagers() {
+        return ResponseEntity.ok(new ApiResponse<>(true, "Managers récupérés", employerService.findManagers()));
+    }
+
     @GetMapping("/organigramme")
     public ResponseEntity<ApiResponse<List<EmployerResponseDTO>>> getOrganigramme() {
         return ResponseEntity.ok(new ApiResponse<>(true, "Organigramme récupéré", employerService.findOrganigramme()));

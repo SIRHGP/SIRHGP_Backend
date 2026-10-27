@@ -200,8 +200,8 @@ public class SucursalService {
         if (!manager.isActif()) {
             throw new IllegalArgumentException("Le manager doit être un compte actif");
         }
-        if (manager.getRole() != null && "SUPER_ADMIN".equals(manager.getRole().getName())) {
-            throw new IllegalArgumentException("Un SUPER_ADMIN ne peut pas être manager de sucursal");
+        if (manager.getRole() == null || !"MANAGER".equals(manager.getRole().getName())) {
+            throw new IllegalArgumentException("Seul un employé ayant le rôle MANAGER peut être affecté à une succursale.");
         }
 
         // Règle d'unicité : un employé ne peut être manager que d'UNE SEULE sucursale.

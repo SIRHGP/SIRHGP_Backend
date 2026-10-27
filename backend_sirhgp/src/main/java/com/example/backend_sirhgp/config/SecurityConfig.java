@@ -119,7 +119,7 @@ public class SecurityConfig {
                         .requestMatchers(HttpMethod.GET, "/api/departements/**", "/api/postes/**")
                         .hasAnyRole("SUPER_ADMIN", "ADMIN", "MANAGER", "LEAD")
                         .requestMatchers("/api/departements/**", "/api/postes/**")
-                        .hasAnyRole("SUPER_ADMIN", "ADMIN")
+                        .hasAnyRole("SUPER_ADMIN", "ADMIN", "MANAGER")
 
                         // Routes documents - CORRECTION IMPORTANTE
                         // Ne pas utiliser de double wildcard mal placé
@@ -128,6 +128,9 @@ public class SecurityConfig {
 
                         .requestMatchers("/api/secretariat/**").hasRole("SECRETAIRE")
                         .requestMatchers("/api/factures/**", "/api/facturation-cycles/**").hasAnyRole("ADMIN", "MANAGER")
+                        .requestMatchers(HttpMethod.GET, "/api/paie/**")
+                                .hasAnyRole("SUPER_ADMIN", "ADMIN", "MANAGER", "LEAD", "STAFF", "STAGIAIRE", "SECRETAIRE")
+                        .requestMatchers("/api/paie/**").hasRole("ADMIN")
                         .requestMatchers(HttpMethod.GET,
                                 "/api/projets/dashboard/**",
                                 "/api/projets/*/dashboard", "/api/projets/statistiques/**")

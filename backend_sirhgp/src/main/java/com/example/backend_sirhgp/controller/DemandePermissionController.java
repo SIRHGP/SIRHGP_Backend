@@ -29,7 +29,7 @@ public class DemandePermissionController {
     private final DemandePermissionService service;
 
     @PostMapping
-    @PreAuthorize("hasAnyRole('STAFF','STAGIAIRE','LEAD','MANAGER','ADMIN','SECRETAIRE')")
+    @PreAuthorize("hasAnyRole('SUPER_ADMIN','STAFF','STAGIAIRE','LEAD','MANAGER','ADMIN','SECRETAIRE')")
     public ResponseEntity<ApiResponse<DemandePermissionResponseDTO>> create(
             @Valid @RequestBody DemandePermissionRequestDTO dto) {
         return ResponseEntity.status(HttpStatus.CREATED)
@@ -37,7 +37,7 @@ public class DemandePermissionController {
     }
 
     @GetMapping("/mes")
-    @PreAuthorize("hasAnyRole('STAFF','STAGIAIRE','LEAD','MANAGER','ADMIN','SECRETAIRE')")
+    @PreAuthorize("hasAnyRole('SUPER_ADMIN','STAFF','STAGIAIRE','LEAD','MANAGER','ADMIN','SECRETAIRE')")
     public ResponseEntity<ApiResponse<List<DemandePermissionResponseDTO>>> mesDemandes() {
         return ResponseEntity.ok(new ApiResponse<>(true, "Mes demandes récupérées", service.mesDemandes()));
     }
@@ -59,7 +59,7 @@ public class DemandePermissionController {
     }
 
     @PatchMapping("/{id}/annuler")
-    @PreAuthorize("hasAnyRole('STAFF','STAGIAIRE','LEAD','MANAGER','ADMIN','SECRETAIRE')")
+    @PreAuthorize("hasAnyRole('SUPER_ADMIN','STAFF','STAGIAIRE','LEAD','MANAGER','ADMIN','SECRETAIRE')")
     public ResponseEntity<ApiResponse<DemandePermissionResponseDTO>> annuler(@PathVariable Long id) {
         return ResponseEntity.ok(new ApiResponse<>(true, "Demande annulée", service.annuler(id)));
     }

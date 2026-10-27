@@ -42,6 +42,13 @@ public class DepartementService {
     @Transactional
     public DepartementResponseDTO create(DepartementRequestDTO dto) {
         String name = dto.getName().trim();
+        boolean manager = "MANAGER".equals(entrepriseContextService.currentRole());
+        if (manager && entrepriseContextService.getScopeSucursalId() == null) {
+            throw new IllegalArgumentException("Votre compte MANAGER doit être rattaché à une succursale pour créer un département.");
+        }
+        if (manager && dto.getSuperviseurId() == null) {
+            throw new IllegalArgumentException("Choisissez un LEAD actif de votre succursale comme chef du département.");
+        }
         Long scopeEntrepriseId = entrepriseContextService.getScopeEntrepriseId();
         Long entrepriseId = scopeEntrepriseId != null ? scopeEntrepriseId : dto.getEntrepriseId();
         boolean superAdmin = "SUPER_ADMIN".equals(entrepriseContextService.currentRole());
@@ -159,6 +166,9 @@ public class DepartementService {
                 .orElseThrow(() -> new ResourceNotFoundException("Chef de département introuvable : " + superviseurId));
         if (superviseur.getRole() == null || !"LEAD".equals(superviseur.getRole().getName())) {
             throw new IllegalArgumentException("Le chef de département doit avoir le rôle LEAD");
+        }
+        if (!superviseur.isActif()) {
+            throw new IllegalArgumentException("Le chef de département doit avoir un compte actif");
         }
         Long scopeEntreprise = entrepriseContextService.getScopeEntrepriseId();
         if (scopeEntreprise != null && (superviseur.getEntreprise() == null
